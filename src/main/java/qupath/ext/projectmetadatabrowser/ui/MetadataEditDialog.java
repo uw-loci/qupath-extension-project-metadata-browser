@@ -86,8 +86,8 @@ public class MetadataEditDialog {
         grid.add(newValue, 1, rowIdx);
 
         VBox content = new VBox(6,
-                new Label("Blank a value to remove that metadata entry. "
-                        + "Fill in the last row to add a new key."),
+                new Label("Clear a value (or enter whitespace only) to remove that "
+                        + "metadata entry. Fill in the last row to add a new key."),
                 grid);
         content.setPadding(new Insets(10));
         dialog.getDialogPane().setContent(content);
@@ -103,16 +103,17 @@ public class MetadataEditDialog {
                 return null;
             Map<String, String> updates = new HashMap<>();
             for (KeyFieldPair f : fields) {
-                String newVal = f.valueField.getText();
-                String oldVal = original.get(f.key);
-                if (!Objects.equals(nullToEmpty(newVal), nullToEmpty(oldVal))) {
-                    updates.put(f.key, newVal == null ? "" : newVal);
+                String newVal = trimToEmpty(f.valueField.getText());
+                String oldVal = trimToEmpty(original.get(f.key));
+                if (!Objects.equals(newVal, oldVal)) {
+                    // Blank values signal deletion via applyMetadataChanges.
+                    updates.put(f.key, newVal);
                 }
             }
             String k = newKey.getText();
             String v = newValue.getText();
-            if (k != null && !k.isBlank() && v != null && !v.isEmpty()) {
-                updates.put(k.trim(), v);
+            if (k != null && !k.isBlank() && v != null && !v.isBlank()) {
+                updates.put(k.trim(), v.trim());
             }
             return updates;
         });
@@ -124,8 +125,8 @@ public class MetadataEditDialog {
         return true;
     }
 
-    private static String nullToEmpty(String s) {
-        return s == null ? "" : s;
+    private static String trimToEmpty(String s) {
+        return s == null ? "" : s.trim();
     }
 
     private record KeyFieldPair(String key, TextField valueField, boolean isNew) {}

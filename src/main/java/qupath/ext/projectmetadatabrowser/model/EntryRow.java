@@ -110,20 +110,34 @@ public class EntryRow {
     }
 
     /**
-     * Apply a set of metadata changes. Keys with {@code null} or empty values
-     * are removed. Caller is responsible for calling {@code project.syncChanges()}
-     * once after all rows have been updated.
+     * Apply a set of metadata changes. Keys with {@code null}, empty, or
+     * whitespace-only values are removed. {@code null} keys are ignored.
+     * Caller is responsible for calling {@code project.syncChanges()} once
+     * after all rows have been updated.
      */
     public void applyMetadataChanges(Map<String, String> updates) {
         Map<String, String> md = entry.getMetadata();
         for (Map.Entry<String, String> e : updates.entrySet()) {
             String key = e.getKey();
+            if (key == null)
+                continue;
             String val = e.getValue();
-            if (val == null || val.isEmpty())
+            if (val == null || val.isBlank())
                 md.remove(key);
             else
                 md.put(key, val);
         }
+    }
+
+    /**
+     * Replace this entry's metadata map wholesale with {@code snapshot}.
+     * Used to roll back after a persistence failure.
+     */
+    public void restoreMetadata(Map<String, String> snapshot) {
+        Map<String, String> md = entry.getMetadata();
+        md.clear();
+        if (snapshot != null)
+            md.putAll(snapshot);
     }
 
     private static String nullSafe(String s) {

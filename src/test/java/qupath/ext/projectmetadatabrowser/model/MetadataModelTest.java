@@ -58,4 +58,40 @@ class MetadataModelTest {
         assertEquals("fresh", md.get("newKey"));
         assertTrue(!md.containsKey("removeMe"));
     }
+
+    @Test
+    void applyMetadataChangesTreatsWhitespaceValueAsDelete() {
+        StubEntry entry = new StubEntry("e", Map.of("k", "v"));
+        EntryRow row = new EntryRow(entry);
+
+        row.applyMetadataChanges(java.util.Collections.singletonMap("k", "   "));
+
+        assertTrue(!entry.getMetadata().containsKey("k"));
+    }
+
+    @Test
+    void applyMetadataChangesIgnoresNullKey() {
+        StubEntry entry = new StubEntry("e", Map.of("k", "v"));
+        EntryRow row = new EntryRow(entry);
+
+        row.applyMetadataChanges(java.util.Collections.singletonMap(null, "x"));
+
+        assertEquals("v", entry.getMetadata().get("k"));
+        assertEquals(1, entry.getMetadata().size());
+    }
+
+    @Test
+    void restoreMetadataReplacesCurrentMap() {
+        StubEntry entry = new StubEntry("e", Map.of("a", "1"));
+        EntryRow row = new EntryRow(entry);
+        Map<String, String> snap = row.snapshotMetadata();
+
+        row.applyMetadataChanges(Map.of("a", "2", "b", "new"));
+        assertEquals("2", entry.getMetadata().get("a"));
+        assertEquals("new", entry.getMetadata().get("b"));
+
+        row.restoreMetadata(snap);
+        assertEquals("1", entry.getMetadata().get("a"));
+        assertTrue(!entry.getMetadata().containsKey("b"));
+    }
 }

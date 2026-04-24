@@ -7,7 +7,11 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.function.Predicate;
 
 import javafx.application.Platform;
@@ -27,10 +31,12 @@ import javafx.scene.control.MenuBar;
 import javafx.scene.control.MenuItem;
 import javafx.scene.control.SelectionMode;
 import javafx.scene.control.SeparatorMenuItem;
+import javafx.scene.control.TableCell;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableRow;
 import javafx.scene.control.TableView;
 import javafx.scene.control.TextField;
+import javafx.scene.control.Tooltip;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
 import javafx.scene.input.KeyCode;
@@ -92,6 +98,8 @@ public class MetadataBrowserWindow {
         stage.setTitle("Project Metadata Browser");
         stage.initOwner(qupath.getStage());
         stage.initModality(Modality.NONE);
+        stage.setMinWidth(600);
+        stage.setMinHeight(400);
 
         filtered = new FilteredList<>(model.getRows(), r -> true);
         sorted = new SortedList<>(filtered);
@@ -99,9 +107,17 @@ public class MetadataBrowserWindow {
         table.setItems(sorted);
         table.getSelectionModel().setSelectionMode(SelectionMode.MULTIPLE);
         table.setTableMenuButtonVisible(true);
+        table.setColumnResizePolicy(TableView.UNCONSTRAINED_RESIZE_POLICY);
+        table.setPlaceholder(new Label("No project open, or project contains no images."));
 
         searchField.setPromptText("Search (all columns, case-insensitive)...");
         searchField.textProperty().addListener((obs, oldV, newV) -> applyFilter());
+
+        Button refreshBtn = new Button("Refresh");
+        refreshBtn.setTooltip(new Tooltip(
+                "Reload entries and metadata from the active project (F5).\n"
+                        + "Use this after a script or acquisition adds metadata."));
+        refreshBtn.setOnAction(e -> reloadFromProject());
 
         Button exportBtn = new Button("Export...");
         exportBtn.setOnAction(e -> exportTable());
@@ -109,7 +125,7 @@ public class MetadataBrowserWindow {
         Button closeBtn = new Button("Close");
         closeBtn.setOnAction(e -> stage.hide());
 
-        HBox topBar = new HBox(8, new Label("Filter:"), searchField);
+        HBox topBar = new HBox(8, new Label("Filter:"), searchField, refreshBtn);
         HBox.setHgrow(searchField, Priority.ALWAYS);
         topBar.setStyle("-fx-padding: 8;");
 
@@ -119,10 +135,12 @@ public class MetadataBrowserWindow {
         MenuBar menuBar = new MenuBar();
         Menu fileMenu = new Menu("File");
         MenuItem refreshItem = new MenuItem("Refresh");
+        refreshItem.setAccelerator(new KeyCodeCombination(KeyCode.F5));
         refreshItem.setOnAction(e -> reloadFromProject());
         MenuItem exportItem = new MenuItem("Export...");
         exportItem.setOnAction(e -> exportTable());
         MenuItem closeItem = new MenuItem("Close");
+        closeItem.setAccelerator(new KeyCodeCombination(KeyCode.ESCAPE));
         closeItem.setOnAction(e -> stage.hide());
         fileMenu.getItems().addAll(refreshItem, new SeparatorMenuItem(), exportItem,
                 new SeparatorMenuItem(), closeItem);
@@ -140,6 +158,9 @@ public class MetadataBrowserWindow {
         scene.getAccelerators().put(
                 new KeyCodeCombination(KeyCode.C, KeyCombination.SHORTCUT_DOWN),
                 this::copySelectionToClipboard);
+        scene.getAccelerators().put(
+                new KeyCodeCombination(KeyCode.F, KeyCombination.SHORTCUT_DOWN),
+                searchField::requestFocus);
 
         table.setRowFactory(tv -> {
             TableRow<EntryRow> row = new TableRow<>();
@@ -173,35 +194,100 @@ public class MetadataBrowserWindow {
 
     private void reloadFromProject() {
         Project<BufferedImage> project = qupath.getProject();
+
+        // Preserve selection by entry ID and scroll position across reload.
+        Set<String> selectedIds = new HashSet<>();
+        for (EntryRow r : table.getSelectionModel().getSelectedItems()) {
+            if (r != null)
+                selectedIds.add(r.getId());
+        }
+
         model.loadFrom(project);
         rebuildColumns();
         updateStatusLabel();
+
+        if (!selectedIds.isEmpty()) {
+            for (EntryRow r : table.getItems()) {
+                if (selectedIds.contains(r.getId()))
+                    table.getSelectionModel().select(r);
+            }
+            EntryRow focus = table.getSelectionModel().getSelectedItem();
+            if (focus != null)
+                table.scrollTo(focus);
+        }
     }
+
+    /**
+     * Map of column-header text -> resolver that produces the cell value for
+     * a given row. We use an explicit map (instead of looking keys up by
+     * column text inside {@link EntryRow#getValueForColumn}) so that a user
+     * metadata key that collides with a built-in column name can be
+     * disambiguated in the header (e.g. {@code "ID (metadata)"}) while still
+     * reading from the right source.
+     */
+    private final Map<String, java.util.function.Function<EntryRow, String>> columnResolvers = new HashMap<>();
 
     private void rebuildColumns() {
         table.getColumns().clear();
         columnsMenu.getItems().clear();
+        columnResolvers.clear();
 
-        List<String> allColumns = new ArrayList<>();
-        allColumns.add(EntryRow.COL_NAME);
-        allColumns.add(EntryRow.COL_ID);
-        allColumns.add(EntryRow.COL_URI);
-        allColumns.add(EntryRow.COL_DESCRIPTION);
-        allColumns.add(EntryRow.COL_TAGS);
-        allColumns.addAll(model.getMetadataKeys());
+        Set<String> builtInNames = Set.of(
+                EntryRow.COL_NAME, EntryRow.COL_ID, EntryRow.COL_URI,
+                EntryRow.COL_DESCRIPTION, EntryRow.COL_TAGS);
 
-        for (String col : allColumns) {
-            TableColumn<EntryRow, String> tc = new TableColumn<>(col);
-            tc.setCellValueFactory(cdf ->
-                    new ReadOnlyStringWrapper(cdf.getValue().getValueForColumn(col)));
-            tc.setPrefWidth(preferredWidthFor(col));
-            tc.setSortable(true);
-            table.getColumns().add(tc);
+        addColumn(EntryRow.COL_NAME, EntryRow::getName);
+        addColumn(EntryRow.COL_ID, EntryRow::getId);
+        addColumn(EntryRow.COL_URI, EntryRow::getUri);
+        addColumn(EntryRow.COL_DESCRIPTION, EntryRow::getDescription);
+        addColumn(EntryRow.COL_TAGS, EntryRow::getTags);
 
-            CheckMenuItem item = new CheckMenuItem(col);
-            item.setSelected(true);
-            item.selectedProperty().bindBidirectional(tc.visibleProperty());
-            columnsMenu.getItems().add(item);
+        for (String key : model.getMetadataKeys()) {
+            String header = builtInNames.contains(key) ? key + " (metadata)" : key;
+            final String metadataKey = key;
+            addColumn(header, r -> r.getMetadata(metadataKey));
+        }
+    }
+
+    private void addColumn(String header, java.util.function.Function<EntryRow, String> resolver) {
+        columnResolvers.put(header, resolver);
+        TableColumn<EntryRow, String> tc = new TableColumn<>(header);
+        tc.setCellValueFactory(cdf -> new ReadOnlyStringWrapper(resolver.apply(cdf.getValue())));
+        tc.setCellFactory(col -> new TooltipTextCell());
+        tc.setPrefWidth(preferredWidthFor(header));
+        tc.setMinWidth(60);
+        tc.setSortable(true);
+        table.getColumns().add(tc);
+
+        CheckMenuItem item = new CheckMenuItem(header);
+        item.setSelected(true);
+        item.selectedProperty().bindBidirectional(tc.visibleProperty());
+        columnsMenu.getItems().add(item);
+    }
+
+    /**
+     * TableCell that shows the full cell value in a tooltip on hover. Cheap
+     * enough to use on every cell; the tooltip is only instantiated when the
+     * cell actually has text.
+     */
+    private static final class TooltipTextCell extends TableCell<EntryRow, String> {
+        @Override
+        protected void updateItem(String item, boolean empty) {
+            super.updateItem(item, empty);
+            if (empty || item == null || item.isEmpty()) {
+                setText(null);
+                setTooltip(null);
+            } else {
+                setText(item);
+                Tooltip tt = getTooltip();
+                if (tt == null) {
+                    tt = new Tooltip();
+                    tt.setWrapText(true);
+                    tt.setMaxWidth(600);
+                    setTooltip(tt);
+                }
+                tt.setText(item);
+            }
         }
     }
 
@@ -227,7 +313,8 @@ public class MetadataBrowserWindow {
             for (TableColumn<EntryRow, ?> c : table.getColumns()) {
                 if (!c.isVisible())
                     continue;
-                String v = row.getValueForColumn(c.getText());
+                var resolver = columnResolvers.get(c.getText());
+                String v = resolver == null ? "" : resolver.apply(row);
                 if (v != null && v.toLowerCase().contains(needle))
                     return true;
             }
@@ -272,6 +359,9 @@ public class MetadataBrowserWindow {
     }
 
     private void editMetadata(EntryRow row) {
+        // Snapshot the entry's metadata before the edit so we can roll back
+        // if syncChanges() fails.
+        Map<String, String> snapshot = row.snapshotMetadata();
         boolean changed = MetadataEditDialog.showFor(stage, row);
         if (!changed)
             return;
@@ -281,9 +371,12 @@ public class MetadataBrowserWindow {
         try {
             project.syncChanges();
         } catch (IOException e) {
-            logger.error("Failed to sync project changes", e);
+            logger.error("Failed to sync project changes; rolling back in-memory metadata", e);
+            row.restoreMetadata(snapshot);
             Dialogs.showErrorNotification("Project Metadata Browser",
-                    "Metadata updated in memory, but saving failed: " + e.getMessage());
+                    "Saving failed; your changes were reverted: " + e.getMessage());
+            reloadFromProject();
+            return;
         }
         qupath.refreshProject();
         reloadFromProject();
@@ -304,7 +397,7 @@ public class MetadataBrowserWindow {
         for (EntryRow r : rows) {
             for (int i = 0; i < visibleCols.size(); i++) {
                 if (i > 0) sb.append('\t');
-                sb.append(escapeCell(r.getValueForColumn(visibleCols.get(i).getText())));
+                sb.append(escapeCell(resolveCell(r, visibleCols.get(i).getText())));
             }
             sb.append('\n');
         }
@@ -314,7 +407,19 @@ public class MetadataBrowserWindow {
         Clipboard.getSystemClipboard().setContent(cc);
     }
 
+    private String resolveCell(EntryRow row, String header) {
+        var resolver = columnResolvers.get(header);
+        return resolver == null ? "" : resolver.apply(row);
+    }
+
     private void exportTable() {
+        List<TableColumn<EntryRow, ?>> visibleCols = visibleColumns();
+        if (visibleCols.isEmpty()) {
+            Dialogs.showErrorNotification("Project Metadata Browser",
+                    "No columns are visible to export. Enable at least one column from the table menu.");
+            return;
+        }
+
         FileChooser fc = new FileChooser();
         fc.setTitle("Export project metadata");
         fc.getExtensionFilters().addAll(
@@ -326,7 +431,6 @@ public class MetadataBrowserWindow {
 
         boolean csv = file.getName().toLowerCase().endsWith(".csv");
         char sep = csv ? ',' : '\t';
-        List<TableColumn<EntryRow, ?>> visibleCols = visibleColumns();
 
         try (BufferedWriter w = Files.newBufferedWriter(Path.of(file.toURI()), StandardCharsets.UTF_8)) {
             for (int i = 0; i < visibleCols.size(); i++) {
@@ -337,7 +441,7 @@ public class MetadataBrowserWindow {
             for (EntryRow r : sorted) {
                 for (int i = 0; i < visibleCols.size(); i++) {
                     if (i > 0) w.write(sep);
-                    w.write(escapeForDelimiter(r.getValueForColumn(visibleCols.get(i).getText()), sep));
+                    w.write(escapeForDelimiter(resolveCell(r, visibleCols.get(i).getText()), sep));
                 }
                 w.write('\n');
             }
