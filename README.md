@@ -1,36 +1,31 @@
 # QuPath Project Metadata Browser
 
-A QuPath extension that opens a dedicated browser window listing every image in
-the currently-open QuPath project as a row, with every metadata key, built-in
-field (name, ID, URI, description, tags), and user-added metadata value as a
-column. Modelled on QuPath's built-in TMA Results Viewer.
+A [QuPath](https://qupath.github.io) extension that opens a table view of
+every image in the current project, with every built-in field and user
+metadata key as a sortable, filterable column. Modelled on QuPath's
+built-in TMA Results Viewer, but for whole projects.
+
+![screenshot placeholder](docs/screenshot.png)
 
 ## Features
 
-- Table view of every `ProjectImageEntry` in the active project.
-- Columns for built-in fields (Name, ID, URI, Description, Tags) plus the union
-  of every user metadata key across the project.
-- Global case-insensitive text search across all visible columns.
-- Native TableView sorting on any column.
-- Multi-row selection with Ctrl+C / context menu copy (tab-separated).
-- Export the current filtered + sorted view to CSV or TSV.
-- Double-click a row to open that image in the main QuPath viewer.
-- Right-click > Edit metadata... to change values in bulk; changes persist via
+- One row per `ProjectImageEntry`; built-in columns (Name, ID, URI,
+  Description, Tags) plus one column per user-metadata key used anywhere
+  in the project.
+- Global case-insensitive search and per-column sort.
+- Multi-row selection with Ctrl+C (TSV) and export to TSV / CSV.
+- Double-click or right-click > Open image.
+- Right-click > Edit metadata... for in-place editing, persisted via
   `project.syncChanges()`.
-
-## Requirements
-
-- QuPath 0.6.0 or later
-- Java 21
+- Refresh (F5) picks up metadata added by scripts or acquisitions while
+  the browser is open.
 
 ## Install
 
-Drop the shadow JAR from `build/libs/` into QuPath's `extensions/` folder, or
-drag it onto the main QuPath window.
+Drop the shadow JAR from `build/libs/` into QuPath's `extensions/`
+folder, or drag it onto the main QuPath window.
 
-## Usage
-
-With a project open, choose:
+## Use
 
 **Extensions > Project Metadata Browser > Browse Metadata...**
 
@@ -39,3 +34,9 @@ With a project open, choose:
 ```
 ./gradlew shadowJar
 ```
+
+Requires QuPath 0.6.0+ and Java 21.
+
+## License
+
+Apache License 2.0 -- see [LICENSE](LICENSE).
