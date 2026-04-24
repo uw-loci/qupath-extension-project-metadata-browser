@@ -86,23 +86,6 @@ public class EntryRow {
     }
 
     /**
-     * Value for any column -- handles both the built-in columns and the
-     * dynamic user-metadata columns.
-     */
-    public String getValueForColumn(String column) {
-        if (column == null)
-            return "";
-        switch (column) {
-            case COL_NAME: return getName();
-            case COL_ID: return getId();
-            case COL_URI: return getUri();
-            case COL_DESCRIPTION: return getDescription();
-            case COL_TAGS: return getTags();
-            default: return getMetadata(column);
-        }
-    }
-
-    /**
      * Snapshot of the current user-metadata map for this entry. Used by the
      * edit dialog as the initial form state. Synchronized on the map to
      * defend against a background script mutating it during the copy --

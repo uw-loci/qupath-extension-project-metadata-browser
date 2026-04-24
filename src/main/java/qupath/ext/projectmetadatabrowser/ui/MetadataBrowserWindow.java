@@ -95,7 +95,7 @@ public class MetadataBrowserWindow {
     private MetadataBrowserWindow(QuPathGUI qupath) {
         this.qupath = qupath;
         this.stage = new Stage();
-        stage.setTitle("Project Metadata Browser");
+        stage.setTitle(titleFor(qupath.getProject()));
         stage.initOwner(qupath.getStage());
         stage.initModality(Modality.NONE);
         stage.setMinWidth(600);
@@ -154,10 +154,17 @@ public class MetadataBrowserWindow {
 
         Scene scene = new Scene(root, 1100, 650);
 
-        // Keyboard shortcuts
-        scene.getAccelerators().put(
-                new KeyCodeCombination(KeyCode.C, KeyCombination.SHORTCUT_DOWN),
-                this::copySelectionToClipboard);
+        // Keyboard shortcuts. Use an event filter for Ctrl+C (rather than a
+        // Scene accelerator) so typing in the search field still supports
+        // the native text-copy behaviour.
+        KeyCodeCombination copyCombo = new KeyCodeCombination(KeyCode.C, KeyCombination.SHORTCUT_DOWN);
+        scene.addEventFilter(javafx.scene.input.KeyEvent.KEY_PRESSED, ev -> {
+            if (copyCombo.match(ev)
+                    && !(scene.getFocusOwner() instanceof javafx.scene.control.TextInputControl)) {
+                copySelectionToClipboard();
+                ev.consume();
+            }
+        });
         scene.getAccelerators().put(
                 new KeyCodeCombination(KeyCode.F, KeyCombination.SHORTCUT_DOWN),
                 searchField::requestFocus);
@@ -190,6 +197,15 @@ public class MetadataBrowserWindow {
         Region r = new Region();
         HBox.setHgrow(r, Priority.ALWAYS);
         return r;
+    }
+
+    private static String titleFor(Project<BufferedImage> project) {
+        if (project == null)
+            return "Project Metadata Browser";
+        String name = project.getName();
+        if (name == null || name.isBlank())
+            return "Project Metadata Browser";
+        return "Project Metadata Browser - " + name;
     }
 
     private void reloadFromProject() {
@@ -239,6 +255,7 @@ public class MetadataBrowserWindow {
         table.setPlaceholder(new Label(project == null
                 ? "No project open."
                 : "Project contains no images."));
+        stage.setTitle(titleFor(project));
 
         updateStatusLabel();
 
@@ -256,10 +273,9 @@ public class MetadataBrowserWindow {
     /**
      * Map of column-header text -> resolver that produces the cell value for
      * a given row. We use an explicit map (instead of looking keys up by
-     * column text inside {@link EntryRow#getValueForColumn}) so that a user
-     * metadata key that collides with a built-in column name can be
-     * disambiguated in the header (e.g. {@code "ID (metadata)"}) while still
-     * reading from the right source.
+     * column text) so that a user metadata key that collides with a built-in
+     * column name can be disambiguated in the header (e.g. {@code "ID
+     * (metadata)"}) while still reading from the right source.
      */
     private final Map<String, java.util.function.Function<EntryRow, String>> columnResolvers = new HashMap<>();
 
@@ -380,16 +396,19 @@ public class MetadataBrowserWindow {
                 editMetadata(row);
         });
         ContextMenu menu = new ContextMenu(openItem, copyItem, new SeparatorMenuItem(), editItem);
-        // The edit dialog only supports one row. Reflect that in the menu so
-        // users with a multi-row selection don't think they're editing all.
+        // Reflect selection state on each show:
+        // - Edit dialog only supports one row.
+        // - Copy/Open need at least one selection.
         menu.setOnShowing(e -> {
             int n = table.getSelectionModel().getSelectedItems().size();
+            copyItem.setDisable(n == 0);
+            openItem.setDisable(n == 0);
             if (n > 1) {
                 editItem.setText("Edit metadata... (only first of " + n + " selected)");
                 editItem.setDisable(true);
             } else {
                 editItem.setText("Edit metadata...");
-                editItem.setDisable(false);
+                editItem.setDisable(n == 0);
             }
         });
         return menu;

@@ -36,9 +36,8 @@ class MetadataModelTest {
 
         assertEquals("img-1", row.getName());
         assertEquals("img-1", row.getId());
-        assertEquals("ppm", row.getValueForColumn("modality"));
-        assertEquals("", row.getValueForColumn("nonexistent"));
-        assertEquals("ppm", row.getValueForColumn("modality"));
+        assertEquals("ppm", row.getMetadata("modality"));
+        assertEquals("", row.getMetadata("nonexistent"));
     }
 
     @Test
