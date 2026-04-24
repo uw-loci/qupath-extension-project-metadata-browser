@@ -195,15 +195,51 @@ public class MetadataBrowserWindow {
     private void reloadFromProject() {
         Project<BufferedImage> project = qupath.getProject();
 
-        // Preserve selection by entry ID and scroll position across reload.
+        // Preserve selection, sort, and column visibility across reload.
         Set<String> selectedIds = new HashSet<>();
         for (EntryRow r : table.getSelectionModel().getSelectedItems()) {
             if (r != null)
                 selectedIds.add(r.getId());
         }
 
+        Map<String, Boolean> visibilityByHeader = new HashMap<>();
+        for (TableColumn<EntryRow, ?> c : table.getColumns())
+            visibilityByHeader.put(c.getText(), c.isVisible());
+
+        String sortHeader = null;
+        TableColumn.SortType sortType = null;
+        if (!table.getSortOrder().isEmpty()) {
+            TableColumn<EntryRow, ?> primary = table.getSortOrder().get(0);
+            sortHeader = primary.getText();
+            sortType = primary.getSortType();
+        }
+
         model.loadFrom(project);
         rebuildColumns();
+
+        // Restore column visibility for headers that still exist.
+        for (TableColumn<EntryRow, ?> c : table.getColumns()) {
+            Boolean visible = visibilityByHeader.get(c.getText());
+            if (visible != null)
+                c.setVisible(visible);
+        }
+
+        // Restore sort.
+        if (sortHeader != null) {
+            for (TableColumn<EntryRow, ?> c : table.getColumns()) {
+                if (sortHeader.equals(c.getText())) {
+                    c.setSortType(sortType);
+                    table.getSortOrder().clear();
+                    table.getSortOrder().add(c);
+                    break;
+                }
+            }
+        }
+
+        table.setPlaceholder(new Label(project == null
+                ? "No project open."
+                : "Project contains no images."));
+
         updateStatusLabel();
 
         if (!selectedIds.isEmpty()) {
@@ -343,7 +379,20 @@ public class MetadataBrowserWindow {
             if (row != null)
                 editMetadata(row);
         });
-        return new ContextMenu(openItem, copyItem, new SeparatorMenuItem(), editItem);
+        ContextMenu menu = new ContextMenu(openItem, copyItem, new SeparatorMenuItem(), editItem);
+        // The edit dialog only supports one row. Reflect that in the menu so
+        // users with a multi-row selection don't think they're editing all.
+        menu.setOnShowing(e -> {
+            int n = table.getSelectionModel().getSelectedItems().size();
+            if (n > 1) {
+                editItem.setText("Edit metadata... (only first of " + n + " selected)");
+                editItem.setDisable(true);
+            } else {
+                editItem.setText("Edit metadata...");
+                editItem.setDisable(false);
+            }
+        });
+        return menu;
     }
 
     private void openEntry(EntryRow row) {
@@ -360,10 +409,12 @@ public class MetadataBrowserWindow {
 
     private void editMetadata(EntryRow row) {
         // Snapshot the entry's metadata before the edit so we can roll back
-        // if syncChanges() fails.
+        // if syncChanges() fails -- but only revert the keys the user
+        // actually changed, so a concurrent script that added a new key
+        // during the edit session is not clobbered.
         Map<String, String> snapshot = row.snapshotMetadata();
-        boolean changed = MetadataEditDialog.showFor(stage, row);
-        if (!changed)
+        Map<String, String> updates = MetadataEditDialog.showFor(stage, row);
+        if (updates == null || updates.isEmpty())
             return;
         Project<BufferedImage> project = qupath.getProject();
         if (project == null)
@@ -371,10 +422,10 @@ public class MetadataBrowserWindow {
         try {
             project.syncChanges();
         } catch (IOException e) {
-            logger.error("Failed to sync project changes; rolling back in-memory metadata", e);
-            row.restoreMetadata(snapshot);
+            logger.error("Failed to sync project changes; rolling back edited keys", e);
+            row.revertChanges(updates, snapshot);
             Dialogs.showErrorNotification("Project Metadata Browser",
-                    "Saving failed; your changes were reverted: " + e.getMessage());
+                    "Saving failed; your edits were reverted: " + e.getMessage());
             reloadFromProject();
             return;
         }
@@ -383,8 +434,10 @@ public class MetadataBrowserWindow {
     }
 
     private void copySelectionToClipboard() {
-        List<EntryRow> rows = table.getSelectionModel().getSelectedItems();
-        if (rows == null || rows.isEmpty())
+        // Snapshot to decouple from the live selection list -- iteration
+        // must not race with any selection-change handlers.
+        List<EntryRow> rows = new ArrayList<>(table.getSelectionModel().getSelectedItems());
+        if (rows.isEmpty())
             return;
         List<TableColumn<EntryRow, ?>> visibleCols = visibleColumns();
 

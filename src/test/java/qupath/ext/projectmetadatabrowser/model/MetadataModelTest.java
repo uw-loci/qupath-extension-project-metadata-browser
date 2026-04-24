@@ -81,17 +81,26 @@ class MetadataModelTest {
     }
 
     @Test
-    void restoreMetadataReplacesCurrentMap() {
+    void revertChangesUndoesOnlyEditedKeys() {
         StubEntry entry = new StubEntry("e", Map.of("a", "1"));
         EntryRow row = new EntryRow(entry);
         Map<String, String> snap = row.snapshotMetadata();
 
-        row.applyMetadataChanges(Map.of("a", "2", "b", "new"));
+        // Simulate the user's edit: change "a" from 1 -> 2, add "b".
+        Map<String, String> updates = new java.util.HashMap<>();
+        updates.put("a", "2");
+        updates.put("b", "new");
+        row.applyMetadataChanges(updates);
         assertEquals("2", entry.getMetadata().get("a"));
         assertEquals("new", entry.getMetadata().get("b"));
 
-        row.restoreMetadata(snap);
+        // Simulate a concurrent script adding a different key.
+        entry.getMetadata().put("script_key", "script_val");
+
+        // Revert the user's edits -- script_key must survive.
+        row.revertChanges(updates, snap);
         assertEquals("1", entry.getMetadata().get("a"));
         assertTrue(!entry.getMetadata().containsKey("b"));
+        assertEquals("script_val", entry.getMetadata().get("script_key"));
     }
 }

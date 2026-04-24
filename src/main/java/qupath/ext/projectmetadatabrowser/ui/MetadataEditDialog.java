@@ -14,6 +14,7 @@ import javafx.scene.control.ButtonBar;
 import javafx.scene.control.ButtonType;
 import javafx.scene.control.Dialog;
 import javafx.scene.control.Label;
+import javafx.scene.control.ScrollPane;
 import javafx.scene.control.TextField;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
@@ -33,9 +34,12 @@ public class MetadataEditDialog {
 
     /**
      * Show the dialog, block until the user commits or cancels, and return
-     * {@code true} if any metadata was changed on the row.
+     * the map of changes that were applied to the row. Returns an empty map
+     * if the user cancelled or made no changes. The returned map describes
+     * the user's delta -- blank values indicate keys to remove, non-blank
+     * values indicate additions or updates.
      */
-    public static boolean showFor(Window owner, EntryRow row) {
+    public static Map<String, String> showFor(Window owner, EntryRow row) {
         Objects.requireNonNull(row, "row");
 
         Dialog<Map<String, String>> dialog = new Dialog<>();
@@ -85,17 +89,25 @@ public class MetadataEditDialog {
         grid.add(newKeyBox, 0, rowIdx);
         grid.add(newValue, 1, rowIdx);
 
-        VBox content = new VBox(6,
-                new Label("Clear a value (or enter whitespace only) to remove that "
-                        + "metadata entry. Fill in the last row to add a new key."),
-                grid);
+        Label hint = new Label(original.isEmpty()
+                ? "This image has no metadata yet. Fill in the row below to add one."
+                : "Clear a value (or enter whitespace only) to remove that "
+                        + "metadata entry. Fill in the last row to add a new key.");
+        hint.setWrapText(true);
+
+        ScrollPane scroller = new ScrollPane(grid);
+        scroller.setFitToWidth(true);
+        scroller.setPrefViewportHeight(360);
+        VBox content = new VBox(6, hint, scroller);
         content.setPadding(new Insets(10));
         dialog.getDialogPane().setContent(content);
+        dialog.setResizable(true);
 
         // Size the dialog so long tables scroll rather than stretching forever.
         Scene scene = dialog.getDialogPane().getScene();
         if (scene != null && scene.getWindow() instanceof Stage stage) {
             stage.setMinWidth(520);
+            stage.setMinHeight(320);
         }
 
         dialog.setResultConverter(bt -> {
@@ -120,9 +132,10 @@ public class MetadataEditDialog {
 
         Optional<Map<String, String>> result = dialog.showAndWait();
         if (result.isEmpty() || result.get().isEmpty())
-            return false;
-        row.applyMetadataChanges(result.get());
-        return true;
+            return java.util.Collections.emptyMap();
+        Map<String, String> updates = result.get();
+        row.applyMetadataChanges(updates);
+        return updates;
     }
 
     private static String trimToEmpty(String s) {

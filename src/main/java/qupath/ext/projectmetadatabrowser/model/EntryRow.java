@@ -54,7 +54,8 @@ public class EntryRow {
         var tags = entry.getTags();
         if (tags == null || tags.isEmpty())
             return "";
-        return String.join(", ", tags);
+        // " | " is safer than ", " -- individual tags may contain commas.
+        return String.join(" | ", tags);
     }
 
     public String getUri() {
@@ -103,10 +104,16 @@ public class EntryRow {
 
     /**
      * Snapshot of the current user-metadata map for this entry. Used by the
-     * edit dialog as the initial form state.
+     * edit dialog as the initial form state. Synchronized on the map to
+     * defend against a background script mutating it during the copy --
+     * QuPath's ProjectImageEntry contract says the map "may or may not" be
+     * thread-safe.
      */
     public Map<String, String> snapshotMetadata() {
-        return new HashMap<>(entry.getMetadata());
+        Map<String, String> md = entry.getMetadata();
+        synchronized (md) {
+            return new HashMap<>(md);
+        }
     }
 
     /**
@@ -117,27 +124,41 @@ public class EntryRow {
      */
     public void applyMetadataChanges(Map<String, String> updates) {
         Map<String, String> md = entry.getMetadata();
-        for (Map.Entry<String, String> e : updates.entrySet()) {
-            String key = e.getKey();
-            if (key == null)
-                continue;
-            String val = e.getValue();
-            if (val == null || val.isBlank())
-                md.remove(key);
-            else
-                md.put(key, val);
+        synchronized (md) {
+            for (Map.Entry<String, String> e : updates.entrySet()) {
+                String key = e.getKey();
+                if (key == null)
+                    continue;
+                String val = e.getValue();
+                if (val == null || val.isBlank())
+                    md.remove(key);
+                else
+                    md.put(key, val);
+            }
         }
     }
 
     /**
-     * Replace this entry's metadata map wholesale with {@code snapshot}.
-     * Used to roll back after a persistence failure.
+     * Reverse a set of metadata changes computed relative to a pre-edit
+     * snapshot. For every key in {@code updates}, restore its value from
+     * {@code snapshot} (or remove it if the snapshot did not contain the
+     * key). Keys outside {@code updates} are left untouched, so a concurrent
+     * script that added a new key during the edit is not clobbered.
      */
-    public void restoreMetadata(Map<String, String> snapshot) {
+    public void revertChanges(Map<String, String> updates, Map<String, String> snapshot) {
+        if (updates == null || updates.isEmpty())
+            return;
         Map<String, String> md = entry.getMetadata();
-        md.clear();
-        if (snapshot != null)
-            md.putAll(snapshot);
+        synchronized (md) {
+            for (String key : updates.keySet()) {
+                if (key == null)
+                    continue;
+                if (snapshot != null && snapshot.containsKey(key))
+                    md.put(key, snapshot.get(key));
+                else
+                    md.remove(key);
+            }
+        }
     }
 
     private static String nullSafe(String s) {
