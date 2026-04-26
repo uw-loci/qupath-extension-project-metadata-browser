@@ -12,7 +12,13 @@ built-in TMA Results Viewer, but for whole projects.
 - One row per `ProjectImageEntry`; built-in columns (Name, ID, URI,
   Description, Tags) plus one column per user-metadata key used anywhere
   in the project.
-- Global case-insensitive search and per-column sort.
+- Global case-insensitive **Filter rows** search and per-column sort.
+- **Fit Columns** button auto-sizes each visible column to its widest
+  content, capped at the **Max column width** preference at the bottom
+  of the window. Cells longer than the cap wrap to multiple lines so
+  nothing is truncated. The cap is saved across QuPath sessions.
+- **Columns** menu lists every column as a checkbox plus **Select All**
+  and **Select None** for bulk show/hide of large metadata keysets.
 - Multi-row selection with Ctrl+C (TSV) and export to TSV / CSV.
 - Double-click or right-click > Open image.
 - Right-click > Edit metadata... for in-place editing, persisted via

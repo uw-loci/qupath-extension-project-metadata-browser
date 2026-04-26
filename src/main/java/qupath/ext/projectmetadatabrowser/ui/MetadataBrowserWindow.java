@@ -31,6 +31,7 @@ import javafx.scene.control.MenuBar;
 import javafx.scene.control.MenuItem;
 import javafx.scene.control.SelectionMode;
 import javafx.scene.control.SeparatorMenuItem;
+import javafx.scene.control.Spinner;
 import javafx.scene.control.TableCell;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableRow;
@@ -47,6 +48,8 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
+import javafx.scene.text.Font;
+import javafx.scene.text.Text;
 import javafx.stage.FileChooser;
 import javafx.stage.Modality;
 import javafx.stage.Stage;
@@ -54,6 +57,7 @@ import javafx.stage.Stage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import qupath.ext.projectmetadatabrowser.Preferences;
 import qupath.ext.projectmetadatabrowser.model.EntryRow;
 import qupath.ext.projectmetadatabrowser.model.MetadataModel;
 import qupath.fx.dialogs.Dialogs;
@@ -119,17 +123,37 @@ public class MetadataBrowserWindow {
                         + "Use this after a script or acquisition adds metadata."));
         refreshBtn.setOnAction(e -> reloadFromProject());
 
+        Button fitBtn = new Button("Fit Columns");
+        fitBtn.setTooltip(new Tooltip(
+                "Resize each visible column to the width of its widest content,\n"
+                        + "capped at the Max column width preference. Long values wrap."));
+        fitBtn.setOnAction(e -> fitColumnsToContent());
+
         Button exportBtn = new Button("Export...");
         exportBtn.setOnAction(e -> exportTable());
 
         Button closeBtn = new Button("Close");
         closeBtn.setOnAction(e -> stage.hide());
 
-        HBox topBar = new HBox(8, new Label("Filter:"), searchField, refreshBtn);
+        HBox topBar = new HBox(8, new Label("Filter rows:"), searchField, refreshBtn, fitBtn);
         HBox.setHgrow(searchField, Priority.ALWAYS);
         topBar.setStyle("-fx-padding: 8;");
 
-        HBox bottomBar = new HBox(8, statusLabel, spacer(), exportBtn, closeBtn);
+        Spinner<Integer> maxWidthSpinner = new Spinner<>(80, 2000,
+                Math.max(80, Preferences.MAX_COLUMN_WIDTH.get()), 20);
+        maxWidthSpinner.setEditable(true);
+        maxWidthSpinner.setPrefWidth(90);
+        maxWidthSpinner.setTooltip(new Tooltip(
+                "Maximum column width in pixels for the Fit Columns button.\n"
+                        + "Cells longer than this wrap to multiple lines.\n"
+                        + "Saved across sessions."));
+        maxWidthSpinner.valueProperty().addListener((obs, o, n) -> {
+            if (n != null) Preferences.MAX_COLUMN_WIDTH.set(n);
+        });
+        Label maxWidthLabel = new Label("Max column width:");
+
+        HBox bottomBar = new HBox(8, statusLabel, spacer(),
+                maxWidthLabel, maxWidthSpinner, exportBtn, closeBtn);
         bottomBar.setStyle("-fx-padding: 8;");
 
         MenuBar menuBar = new MenuBar();
@@ -299,6 +323,54 @@ public class MetadataBrowserWindow {
             final String metadataKey = key;
             addColumn(header, r -> r.getMetadata(metadataKey));
         }
+
+        // Bulk visibility actions appended after the per-column toggles.
+        columnsMenu.getItems().add(new SeparatorMenuItem());
+        MenuItem selectAll = new MenuItem("Select All");
+        selectAll.setOnAction(e -> setAllColumnsVisible(true));
+        MenuItem selectNone = new MenuItem("Select None");
+        selectNone.setOnAction(e -> setAllColumnsVisible(false));
+        columnsMenu.getItems().addAll(selectAll, selectNone);
+    }
+
+    private void setAllColumnsVisible(boolean visible) {
+        for (TableColumn<EntryRow, ?> c : table.getColumns()) {
+            c.setVisible(visible);
+        }
+    }
+
+    /**
+     * Resize each visible column so its preferred width matches its widest
+     * actual content (header or any visible cell), capped at the user's
+     * {@link Preferences#MAX_COLUMN_WIDTH} preference. Cells longer than the
+     * cap wrap to multiple lines via {@link TooltipTextCell}'s wrap-text
+     * setting.
+     */
+    private void fitColumnsToContent() {
+        int maxWidth = Math.max(80, Preferences.MAX_COLUMN_WIDTH.get());
+        Font font = Font.getDefault();
+        double headerPad = 24;  // sort glyph + padding
+        double cellPad = 16;
+        for (TableColumn<EntryRow, ?> col : table.getColumns()) {
+            if (!col.isVisible()) continue;
+            double widest = textWidth(col.getText(), font) + headerPad;
+            for (EntryRow row : table.getItems()) {
+                String v = resolveCell(row, col.getText());
+                if (v == null || v.isEmpty()) continue;
+                double w = textWidth(v, font) + cellPad;
+                if (w > widest) {
+                    widest = w;
+                    if (widest >= maxWidth) break;
+                }
+            }
+            col.setPrefWidth(Math.min(maxWidth, Math.max(60, widest)));
+        }
+    }
+
+    private static double textWidth(String s, Font font) {
+        Text t = new Text(s);
+        t.setFont(font);
+        return t.getLayoutBounds().getWidth();
     }
 
     private void addColumn(String header, java.util.function.Function<EntryRow, String> resolver) {
@@ -323,6 +395,13 @@ public class MetadataBrowserWindow {
      * cell actually has text.
      */
     private static final class TooltipTextCell extends TableCell<EntryRow, String> {
+        TooltipTextCell() {
+            // Wrap long values to multiple lines instead of ellipsizing,
+            // so a narrow column stays useful. The TableView grows the row
+            // height automatically when a wrapped cell needs more space.
+            setWrapText(true);
+        }
+
         @Override
         protected void updateItem(String item, boolean empty) {
             super.updateItem(item, empty);
