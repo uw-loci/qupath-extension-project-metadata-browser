@@ -151,6 +151,10 @@ public class MetadataBrowserWindow {
             if (n != null) Preferences.MAX_COLUMN_WIDTH.set(n);
         });
         Label maxWidthLabel = new Label("Max column width:");
+        maxWidthLabel.setTooltip(new Tooltip(
+                "Maximum column width in pixels for the Fit Columns button.\n"
+                        + "Cells longer than this wrap to multiple lines.\n"
+                        + "Saved across sessions."));
 
         HBox bottomBar = new HBox(8, statusLabel, spacer(),
                 maxWidthLabel, maxWidthSpinner, exportBtn, closeBtn);
