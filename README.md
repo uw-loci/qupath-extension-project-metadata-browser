@@ -43,6 +43,10 @@ folder, or drag it onto the main QuPath window.
 
 Requires QuPath 0.6.0+ and Java 21.
 
+## Support
+
+For general support and feature requests, please post on the [image.sc forum](https://forum.image.sc/) with the `#qupath` tag and mention `@Mike_Nelson` to flag the topic for my attention.
+
 ## License
 
 Apache License 2.0 -- see [LICENSE](LICENSE).
