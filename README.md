@@ -19,7 +19,7 @@ built-in TMA Results Viewer, but for whole projects.
   nothing is truncated. The cap is saved across QuPath sessions.
 - **Columns** menu lists every column as a checkbox plus **Select All**
   and **Select None** for bulk show/hide of large metadata keysets.
-- Multi-row selection with Ctrl+C (TSV) and export to TSV / CSV.
+- Multi-row selection with Ctrl+C (TSV) and export to CSV (default) or TSV.
 - Double-click or right-click > Open image.
 - Right-click > Edit metadata... for in-place editing, persisted via
   `project.syncChanges()`.
