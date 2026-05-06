@@ -578,14 +578,14 @@ public class MetadataBrowserWindow {
         FileChooser fc = new FileChooser();
         fc.setTitle("Export project metadata");
         fc.getExtensionFilters().addAll(
-                new FileChooser.ExtensionFilter("Tab-separated values (*.tsv)", "*.tsv"),
-                new FileChooser.ExtensionFilter("Comma-separated values (*.csv)", "*.csv"));
+                new FileChooser.ExtensionFilter("Comma-separated values (*.csv)", "*.csv"),
+                new FileChooser.ExtensionFilter("Tab-separated values (*.tsv)", "*.tsv"));
         java.io.File file = fc.showSaveDialog(stage);
         if (file == null)
             return;
 
-        boolean csv = file.getName().toLowerCase().endsWith(".csv");
-        char sep = csv ? ',' : '\t';
+        boolean tsv = file.getName().toLowerCase().endsWith(".tsv");
+        char sep = tsv ? '\t' : ',';
 
         try (BufferedWriter w = Files.newBufferedWriter(Path.of(file.toURI()), StandardCharsets.UTF_8)) {
             for (int i = 0; i < visibleCols.size(); i++) {
