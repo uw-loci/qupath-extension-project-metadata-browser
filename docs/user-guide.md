@@ -31,6 +31,22 @@ WSL smoke in Phase 6).
 </details>
 
 <details>
+<summary><strong>Before you start (recommended)</strong></summary>
+
+- Back up the project (or have it under version control). The Metadata
+  Keys tab does not snapshot the project file for you.
+- Close any other QuPath sessions that might be editing the same project.
+  Concurrent edits during a rename or delete can race against the
+  in-memory rollback path.
+- If you are unsure of a key's usage, click it and check the Used by
+  count plus the Sample value before renaming or deleting.
+- For audit-conscious workflows, the operation is recorded to QuPath's
+  log at INFO level but is not written to a per-project audit trail.
+  Note the original key name yourself if you need to undo later.
+
+</details>
+
+<details>
 <summary><strong>Renaming a metadata key across the project</strong></summary>
 
 1. Click the **Metadata Keys** tab.
@@ -78,8 +94,9 @@ in Phase 6).
    *Limitations*).
 4. Click **Delete from N entries** to commit. The key disappears from
    every entry in the project. The Delete button is styled red and is
-   **not** the default button; pressing Enter on this dialog does
-   nothing. Cancel is focused by default.
+   **not** the default button; pressing Enter on the Delete confirmation
+   triggers Cancel (the focused button), which closes the dialog without
+   removing any keys.
 
 There is no undo. If you remove a key by accident, your only recovery is
 to restore `project.qpproj` from a backup or version control — close

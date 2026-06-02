@@ -162,7 +162,24 @@ public final class MetadataKeyOperations {
         } catch (IOException e) {
             logger.error("syncChanges failed during rename of '{}' -> '{}'; rolling back {} entries",
                     oldKey, newKey, touched.size(), e);
-            revertSnapshots(touched, snapshots);
+            List<Throwable> revertFailures = new ArrayList<>();
+            try {
+                revertSnapshots(touched, snapshots, revertFailures);
+            } finally {
+                // Attempt to persist the rolled-back state. If this second sync
+                // also fails, attach it as a suppressed exception on the
+                // original IOException so the user-visible chain preserves the
+                // original cause.
+                try {
+                    project.syncChanges();
+                } catch (IOException syncEx) {
+                    logger.error("Second syncChanges() after rollback also failed for rename of '{}' -> '{}'",
+                            oldKey, newKey, syncEx);
+                    e.addSuppressed(syncEx);
+                }
+                for (Throwable revertEx : revertFailures)
+                    e.addSuppressed(revertEx);
+            }
             throw e;
         }
         return new Result(mutated, failed);
@@ -213,7 +230,24 @@ public final class MetadataKeyOperations {
         } catch (IOException e) {
             logger.error("syncChanges failed during remove of '{}'; rolling back {} entries",
                     key, touched.size(), e);
-            revertSnapshots(touched, snapshots);
+            List<Throwable> revertFailures = new ArrayList<>();
+            try {
+                revertSnapshots(touched, snapshots, revertFailures);
+            } finally {
+                // Attempt to persist the rolled-back state. If this second sync
+                // also fails, attach it as a suppressed exception on the
+                // original IOException so the user-visible chain preserves the
+                // original cause.
+                try {
+                    project.syncChanges();
+                } catch (IOException syncEx) {
+                    logger.error("Second syncChanges() after rollback also failed for remove of '{}'",
+                            key, syncEx);
+                    e.addSuppressed(syncEx);
+                }
+                for (Throwable revertEx : revertFailures)
+                    e.addSuppressed(revertEx);
+            }
             throw e;
         }
         return new Result(mutated, failed);
@@ -226,23 +260,73 @@ public final class MetadataKeyOperations {
      * snapshot is the source of truth for the entries we touched. Keys we
      * never touched (on entries that were not in {@code touched}) are
      * untouched.
+     *
+     * <p>Resilience: each entry is reverted inside its own try/catch so a
+     * single failing entry does not abort the rest of the revert loop. Any
+     * collected failures are logged at ERROR and returned to the caller via
+     * the supplied {@code revertFailures} list -- the caller decides whether
+     * to surface them as suppressed exceptions on the user-visible throw.
      */
     private static void revertSnapshots(List<ProjectImageEntry<BufferedImage>> touched,
-                                         Map<String, Map<String, String>> snapshots) {
+                                         Map<String, Map<String, String>> snapshots,
+                                         List<Throwable> revertFailures) {
         Set<String> reverted = new HashSet<>();
         for (ProjectImageEntry<BufferedImage> entry : touched) {
-            Map<String, String> snap = snapshots.get(entry.getID());
-            if (snap == null)
-                continue;
+            try {
+                Map<String, String> snap = snapshots.get(entry.getID());
+                if (snap == null)
+                    continue;
+                Map<String, String> md = entry.getMetadata();
+                if (md == null)
+                    continue;
+                synchronized (md) {
+                    md.clear();
+                    md.putAll(snap);
+                }
+                reverted.add(entry.getID());
+            } catch (RuntimeException ex) {
+                logger.error("Failed to revert metadata snapshot for entry '{}'",
+                        entry.getID(), ex);
+                revertFailures.add(ex);
+            }
+        }
+        logger.info("Reverted metadata on {} entries from pre-mutation snapshot", reverted.size());
+    }
+
+    /**
+     * Count how many entries in {@code project} have BOTH {@code oldKey} and
+     * {@code newKey} set -- i.e. the entries on which the collision policy
+     * would actually decide an outcome. Returns 0 if either key is null or
+     * blank (the UI gates on validation before calling).
+     *
+     * <p>This is a read-only scan and does not call {@code syncChanges()}.
+     * Uses the same {@code synchronized(getMetadata())} discipline as the
+     * mutating paths.
+     *
+     * @param project the project to inspect. Must not be null.
+     * @param oldKey the source key.
+     * @param newKey the prospective new key.
+     * @return number of entries with both keys set; 0 if either argument is
+     *         null or blank.
+     */
+    public static int countCollisions(Project<BufferedImage> project,
+                                       String oldKey,
+                                       String newKey) {
+        Objects.requireNonNull(project, "project");
+        if (oldKey == null || oldKey.isBlank() || newKey == null || newKey.isBlank())
+            return 0;
+        if (oldKey.equals(newKey))
+            return 0;
+        int count = 0;
+        for (ProjectImageEntry<BufferedImage> entry : project.getImageList()) {
             Map<String, String> md = entry.getMetadata();
             if (md == null)
                 continue;
             synchronized (md) {
-                md.clear();
-                md.putAll(snap);
+                if (md.containsKey(oldKey) && md.containsKey(newKey))
+                    count++;
             }
-            reverted.add(entry.getID());
         }
-        logger.info("Reverted metadata on {} entries from pre-mutation snapshot", reverted.size());
+        return count;
     }
 }

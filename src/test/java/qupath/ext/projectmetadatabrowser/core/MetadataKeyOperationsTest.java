@@ -141,8 +141,9 @@ class MetadataKeyOperationsTest {
         assertEquals("original", b.getMetadata().get("Antibody"));
         // Untouched entry untouched.
         assertEquals("stays", c.getMetadata().get("untouched"));
-        // The sync was attempted exactly once -- no retry inside the operation.
-        assertEquals(1, project.syncCount);
+        // The initial sync failed, then the post-revert sync persisted the
+        // rolled-back state -- two sync calls in total.
+        assertEquals(2, project.syncCount);
     }
 
     @Test
@@ -192,6 +193,64 @@ class MetadataKeyOperationsTest {
         assertEquals("1", a.getMetadata().get("Antibody"));
         assertFalse(a.getMetadata().containsKey("typo"));
         assertEquals("from_script", a.getMetadata().get("extra"));
+    }
+
+    @Test
+    void countCollisionsReturnsEntriesWithBothKeys() {
+        // Verifies: countCollisions returns the number of entries that have
+        // BOTH the old and new keys set, ignoring entries that have only one
+        // or neither.
+        StubEntry a = new StubEntry("a", linkedMap("typo", "v1", "Antibody", "ov1"));
+        StubEntry b = new StubEntry("b", linkedMap("typo", "v2", "Antibody", "ov2"));
+        StubEntry c = new StubEntry("c", Map.of("typo", "only_old"));
+        StubEntry d = new StubEntry("d", Map.of("Antibody", "only_new"));
+        StubEntry e = new StubEntry("e", Map.of("unrelated", "value"));
+        StubProject project = new StubProject(List.of(a, b, c, d, e));
+
+        int collisions = MetadataKeyOperations.countCollisions(project, "typo", "Antibody");
+
+        assertEquals(2, collisions);
+        // No side effects -- sync must not have been called.
+        assertEquals(0, project.syncCount);
+    }
+
+    @Test
+    void countCollisionsReturnsZeroForBlankOrEqualKeys() {
+        // Verifies: countCollisions short-circuits to 0 for null / blank
+        // arguments and for oldKey.equals(newKey).
+        StubEntry a = new StubEntry("a", linkedMap("typo", "v", "Antibody", "v2"));
+        StubProject project = new StubProject(List.of(a));
+
+        assertEquals(0, MetadataKeyOperations.countCollisions(project, "typo", ""));
+        assertEquals(0, MetadataKeyOperations.countCollisions(project, "", "Antibody"));
+        assertEquals(0, MetadataKeyOperations.countCollisions(project, "typo", null));
+        assertEquals(0, MetadataKeyOperations.countCollisions(project, "typo", "typo"));
+    }
+
+    @Test
+    void renameRollbackPreservesOriginalIOExceptionAsTheThrown() {
+        // Verifies: when syncChanges throws and the revert succeeds, the
+        // ORIGINAL IOException is the one thrown (not a wrapping/replacement),
+        // and the in-memory state matches the pre-mutation snapshot.
+        StubEntry a = new StubEntry("a", Map.of("typo", "v1"));
+        StubEntry b = new StubEntry("b", linkedMap("typo", "v2", "Antibody", "kept"));
+        StubProject project = new StubProject(List.of(a, b));
+        project.failNextSync = true;
+
+        IOException thrown = assertThrows(IOException.class, () ->
+                MetadataKeyOperations.renameAcrossProject(
+                        project, "typo", "Antibody", CollisionPolicy.OVERWRITE));
+        assertEquals("simulated sync failure", thrown.getMessage());
+        // No suppressed exceptions when the revert path itself succeeds.
+        assertEquals(0, thrown.getSuppressed().length);
+
+        // In-memory state matches the pre-mutation snapshot.
+        assertEquals("v1", a.getMetadata().get("typo"));
+        assertFalse(a.getMetadata().containsKey("Antibody"));
+        assertEquals("v2", b.getMetadata().get("typo"));
+        assertEquals("kept", b.getMetadata().get("Antibody"));
+        // Initial failing sync + one successful post-revert sync.
+        assertEquals(2, project.syncCount);
     }
 
     @Test

@@ -276,10 +276,13 @@ public final class MetadataKeysTab {
             return;
         }
 
+        String oldKeyForCounter = selected.getKey();
         RenameKeyDialog.Result result = RenameKeyDialog.showFor(
                 root.getScene() == null ? null : root.getScene().getWindow(),
-                selected.getKey(),
-                selected.getEntryCount());
+                oldKeyForCounter,
+                selected.getEntryCount(),
+                candidateNewKey -> MetadataKeyOperations.countCollisions(
+                        project, oldKeyForCounter, candidateNewKey));
         if (result == null)
             return;
 

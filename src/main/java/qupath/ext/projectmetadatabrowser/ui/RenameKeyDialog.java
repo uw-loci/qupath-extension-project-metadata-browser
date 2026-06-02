@@ -1,6 +1,7 @@
 package qupath.ext.projectmetadatabrowser.ui;
 
 import java.util.Optional;
+import java.util.function.ToIntFunction;
 
 import javafx.geometry.Insets;
 import javafx.scene.Scene;
@@ -13,7 +14,6 @@ import javafx.scene.control.RadioButton;
 import javafx.scene.control.TextField;
 import javafx.scene.control.ToggleGroup;
 import javafx.scene.control.Tooltip;
-import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
 import javafx.stage.Modality;
 import javafx.stage.Stage;
@@ -62,10 +62,19 @@ public final class RenameKeyDialog {
      * @param owner the owner window. May be null.
      * @param oldKey the existing key being renamed.
      * @param entryCount how many entries currently have {@code oldKey}.
+     * @param collisionCounter callback that, given a prospective new key,
+     *                         returns the number of entries that have BOTH
+     *                         the old key and that new key set. Used to show
+     *                         a live "N of M entries already have this key."
+     *                         hint as the user types. May be null, in which
+     *                         case the collision hint is hidden.
      * @return the user's chosen new key and collision policy, or
      *         {@code null} if the user cancelled.
      */
-    public static Result showFor(Window owner, String oldKey, int entryCount) {
+    public static Result showFor(Window owner,
+                                  String oldKey,
+                                  int entryCount,
+                                  ToIntFunction<String> collisionCounter) {
         Dialog<Result> dialog = new Dialog<>();
         dialog.setTitle("Rename metadata key");
         dialog.setHeaderText(null);
@@ -95,7 +104,17 @@ public final class RenameKeyDialog {
         validationLabel.setMinHeight(36);
         validationLabel.setPrefHeight(36);
 
+        // Collision-count hint: shown below the validation row, above the
+        // policy header. Reserved height so the dialog does not jump as the
+        // text comes and goes.
+        Label collisionLabel = new Label(" ");
+        collisionLabel.setWrapText(true);
+        collisionLabel.setMinHeight(18);
+        collisionLabel.setPrefHeight(18);
+        collisionLabel.setStyle("-fx-text-fill: #666;");
+
         Label policyLabel = new Label("If the new key already exists on an entry:");
+        policyLabel.setStyle("-fx-font-weight: bold;");
         policyLabel.setWrapText(true);
 
         ToggleGroup policyGroup = new ToggleGroup();
@@ -126,6 +145,7 @@ public final class RenameKeyDialog {
                 newKeyLabel,
                 newKeyField,
                 validationLabel,
+                collisionLabel,
                 policyBox);
         content.setPadding(new Insets(12));
         dialog.getDialogPane().setContent(content);
@@ -149,6 +169,10 @@ public final class RenameKeyDialog {
 
         // Validation: runs on every keystroke or policy change. Updates the
         // inline label text + style and the Rename button's disable property.
+        // The collision label is updated whenever the candidate new key is
+        // syntactically valid -- it tells the user "N of M entries already
+        // have this key" so they can make an informed Overwrite/Skip choice.
+        String totalEntriesText = entryCount == 1 ? "1 entry" : entryCount + " entries";
         Runnable revalidate = () -> {
             String raw = newKeyField.getText();
             String text = raw == null ? "" : raw;
@@ -178,6 +202,28 @@ public final class RenameKeyDialog {
             validationLabel.setText(message);
             validationLabel.setStyle(style);
             renameButton.setDisable(!(ok && nonCancelPolicy));
+
+            // Collision-count hint. Only meaningful when the candidate new key
+            // passes structural validation; otherwise blank the label.
+            if (!ok || collisionCounter == null) {
+                collisionLabel.setText(" ");
+            } else {
+                int collisions;
+                try {
+                    collisions = collisionCounter.applyAsInt(text);
+                } catch (RuntimeException ex) {
+                    collisions = 0;
+                }
+                String collisionText;
+                if (collisions == 0) {
+                    collisionText = "No entries have both keys; the collision policy will not be exercised.";
+                } else if (collisions == 1) {
+                    collisionText = "1 of " + totalEntriesText + " already has a value for this key.";
+                } else {
+                    collisionText = collisions + " of " + totalEntriesText + " already have a value for this key.";
+                }
+                collisionLabel.setText(collisionText);
+            }
         };
         newKeyField.textProperty().addListener((obs, o, n) -> revalidate.run());
         policyGroup.selectedToggleProperty().addListener((obs, o, n) -> revalidate.run());
