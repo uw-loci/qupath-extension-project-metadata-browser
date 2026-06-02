@@ -1,5 +1,6 @@
-# Javadocs
-docs/
+# Javadocs (generated; user-facing docs live in docs/ and are tracked --
+# the build emits javadoc under build/docs/, which is already covered by
+# the build/ rule below).
 
 # Maven
 deploy/

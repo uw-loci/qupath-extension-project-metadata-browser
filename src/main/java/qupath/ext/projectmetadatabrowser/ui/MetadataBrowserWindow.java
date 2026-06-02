@@ -32,6 +32,8 @@ import javafx.scene.control.MenuItem;
 import javafx.scene.control.SelectionMode;
 import javafx.scene.control.SeparatorMenuItem;
 import javafx.scene.control.Spinner;
+import javafx.scene.control.Tab;
+import javafx.scene.control.TabPane;
 import javafx.scene.control.TableCell;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableRow;
@@ -53,6 +55,8 @@ import javafx.scene.text.Text;
 import javafx.stage.FileChooser;
 import javafx.stage.Modality;
 import javafx.stage.Stage;
+import javafx.util.Duration;
+import javafx.animation.PauseTransition;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -83,6 +87,21 @@ public class MetadataBrowserWindow {
     private final FilteredList<EntryRow> filtered;
     private final SortedList<EntryRow> sorted;
     private final Menu columnsMenu = new Menu("Columns");
+
+    // New in v0.2.0: TabPane wrapping the entries table + a Metadata Keys tab.
+    private final TabPane tabPane = new TabPane();
+    private final Tab entriesTab = new Tab("Entries");
+    private final Tab keysTab = new Tab("Metadata Keys");
+    private final MetadataKeysTab keysTabController;
+    // Toolbar controls hoisted to fields so the tab-change listener can disable
+    // them on the Keys tab (Filter and Fit Columns apply only to the entries
+    // table).
+    private final Button fitBtn = new Button("Fit Columns");
+    // Transient status-line message handling. When a key-level mutation
+    // completes successfully, the parent window shows a one-line summary in
+    // place of the per-tab count text for ~5 seconds before reverting.
+    private final PauseTransition statusRevert = new PauseTransition(Duration.seconds(5));
+    private String transientStatusMessage = null;
 
     private final ChangeListener<Project<BufferedImage>> projectListener;
 
@@ -123,7 +142,6 @@ public class MetadataBrowserWindow {
                         + "Use this after a script or acquisition adds metadata."));
         refreshBtn.setOnAction(e -> reloadFromProject());
 
-        Button fitBtn = new Button("Fit Columns");
         fitBtn.setTooltip(new Tooltip(
                 "Resize each visible column to the width of its widest content,\n"
                         + "capped at the Max column width preference. Long values wrap."));
@@ -174,10 +192,36 @@ public class MetadataBrowserWindow {
                 new SeparatorMenuItem(), closeItem);
         menuBar.getMenus().addAll(fileMenu, columnsMenu);
 
+        // Wrap the entries table and the new Metadata Keys tab in a TabPane.
+        // Entries first preserves opening into the established view; the new
+        // tab is one click away. Per design 02 Section 1, tabs are not
+        // closable -- they're the window's primary view selector.
+        keysTabController = new MetadataKeysTab(
+                qupath,
+                model,
+                this::reloadFromProject,
+                this::showTransientStatusMessage,
+                this::updateStatusLabel);
+        BorderPane entriesContent = new BorderPane(table);
+        entriesTab.setContent(entriesContent);
+        entriesTab.setClosable(false);
+        keysTab.setContent(keysTabController.getRoot());
+        keysTab.setClosable(false);
+        tabPane.getTabs().addAll(entriesTab, keysTab);
+        // Tab-change listener: disable Filter / Fit Columns / Columns menu when
+        // the Keys tab is active; update the status line per active tab.
+        tabPane.getSelectionModel().selectedItemProperty().addListener((obs, oldTab, newTab) -> {
+            boolean keysActive = newTab == keysTab;
+            searchField.setDisable(keysActive);
+            fitBtn.setDisable(keysActive);
+            columnsMenu.setDisable(keysActive);
+            updateStatusLabel();
+        });
+
         BorderPane root = new BorderPane();
         VBox top = new VBox(menuBar, topBar);
         root.setTop(top);
-        root.setCenter(table);
+        root.setCenter(tabPane);
         root.setBottom(bottomBar);
 
         Scene scene = new Scene(root, 1100, 650);
@@ -195,7 +239,12 @@ public class MetadataBrowserWindow {
         });
         scene.getAccelerators().put(
                 new KeyCodeCombination(KeyCode.F, KeyCombination.SHORTCUT_DOWN),
-                searchField::requestFocus);
+                () -> {
+                    // Ctrl+F focuses the Entries-tab filter and switches the
+                    // active tab to Entries so the focus shift is visible.
+                    tabPane.getSelectionModel().select(entriesTab);
+                    searchField.requestFocus();
+                });
 
         table.setRowFactory(tv -> {
             TableRow<EntryRow> row = new TableRow<>();
@@ -211,6 +260,17 @@ public class MetadataBrowserWindow {
         // Filter live as status updates
         filtered.predicateProperty().addListener((obs, o, n) -> updateStatusLabel());
         model.getRows().addListener((ListChangeListener<EntryRow>) c -> updateStatusLabel());
+        // Keys-list size changes (after a reload) update the Keys-tab status.
+        model.getKeyRows().addListener(
+                (ListChangeListener<qupath.ext.projectmetadatabrowser.model.MetadataKeyRow>) c -> updateStatusLabel());
+
+        // Status-line revert: when the 5-second pause finishes, clear the
+        // transient message so the next updateStatusLabel call returns to the
+        // per-tab count text.
+        statusRevert.setOnFinished(ev -> {
+            transientStatusMessage = null;
+            updateStatusLabel();
+        });
 
         stage.setScene(scene);
 
@@ -459,8 +519,31 @@ public class MetadataBrowserWindow {
     }
 
     private void updateStatusLabel() {
-        statusLabel.setText(String.format("Entries: %d shown / %d total",
-                filtered.size(), model.getRows().size()));
+        if (transientStatusMessage != null) {
+            statusLabel.setText(transientStatusMessage);
+            return;
+        }
+        boolean keysActive = tabPane.getSelectionModel().getSelectedItem() == keysTab;
+        if (keysActive) {
+            statusLabel.setText(String.format("Keys: %d shown / %d total",
+                    keysTabController.getFilteredKeyCount(),
+                    keysTabController.getTotalKeyCount()));
+        } else {
+            statusLabel.setText(String.format("Entries: %d shown / %d total",
+                    filtered.size(), model.getRows().size()));
+        }
+    }
+
+    /**
+     * Show a transient status-line message that reverts to the per-tab count
+     * text after ~5 seconds. Called by {@link MetadataKeysTab} after a
+     * successful rename or remove.
+     */
+    private void showTransientStatusMessage(String message) {
+        transientStatusMessage = message;
+        updateStatusLabel();
+        statusRevert.stop();
+        statusRevert.playFromStart();
     }
 
     private ContextMenu buildRowContextMenu() {
