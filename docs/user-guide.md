@@ -16,14 +16,10 @@ a new key name on every entry that has it — or **remove** a key from every
 entry that has it. Both operations touch the whole project at once and run
 under a single `project.syncChanges()`; both are irreversible.
 
-This tab implements a feature request from sebg on the QuPath community
-forum, generalizing Pete Bankhead's per-project rename script and adding a
-matching removal operation with usage counts and a no-undo confirmation
-gate. Forum thread:
-[<FORUM_THREAD_URL>](<FORUM_THREAD_URL>).
-
-<!-- TODO: backfill <FORUM_THREAD_URL> at release time; see
-     metadata-keys-tab/02b_design_docs.md Blocking questions. -->
+This tab implements a feature request from `sebg` on the QuPath
+community forum at [image.sc](https://forum.image.sc/), generalizing
+Pete Bankhead's per-project rename script and adding a matching removal
+operation with usage counts and a no-undo confirmation gate.
 
 Screenshot: `images/metadata-keys-tab-overview.png` (to be captured during
 WSL smoke in Phase 6).

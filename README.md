@@ -34,11 +34,9 @@ new Metadata Keys tab. See [user guide](docs/user-guide.md#metadata-keys-tab).
   across every image, or **remove** it from every image, in one
   operation. Destructive actions are gated behind a no-undo
   confirmation. See the [user guide](docs/user-guide.md#metadata-keys-tab)
-  for step-by-step. Inspired by sebg's request on the QuPath community
-  forum ([thread](<FORUM_THREAD_URL>)).
-  <!-- TODO: backfill <FORUM_THREAD_URL> at release time; the forum URL
-       was not known at Phase 2 (see metadata-keys-tab/02b_design_docs.md
-       Blocking questions). -->
+  for step-by-step. Originating from a request by `sebg` (with Pete
+  Bankhead's per-project rename script) on the QuPath community forum
+  at [image.sc](https://forum.image.sc/).
 - Refresh (F5) picks up metadata added by scripts or acquisitions while
   the browser is open.
 
@@ -67,11 +65,10 @@ For general support and feature requests, please post on the [image.sc forum](ht
 
 The project-wide rename script that the Metadata Keys tab's rename
 operation is modelled on was written by Pete Bankhead and shared on
-the QuPath community forum thread linked above (request by sebg).
-The tab generalizes that script and adds the matching removal
-operation, a usage count per key, and a no-undo confirmation gate.
-Forum thread: <FORUM_THREAD_URL>.
-<!-- TODO: backfill <FORUM_THREAD_URL> at release time. -->
+the QuPath community forum at [image.sc](https://forum.image.sc/) in
+response to a request by `sebg`. The tab generalizes that script and
+adds the matching removal operation, a usage count per key, and a
+no-undo confirmation gate.
 
 ## License
 
