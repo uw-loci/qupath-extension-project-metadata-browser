@@ -93,42 +93,45 @@ For general support and feature requests, please post on the [image.sc forum](ht
 
 ## Source / prior art
 
-**If you are looking for a QuPath project-metadata editor, look at
-[`zindy/qupath-extension-project-metadata-editor`](https://github.com/zindy/qupath-extension-project-metadata-editor)
-first.** Egor Zindy (`@EP.Zindy`) extracted QuPath's built-in
-project-metadata editor into a standalone extension and has been
-extending it actively — undo / redo, column add / rename / remove /
-copy, regex extraction from filenames, Search & Replace, train / val /
-test split assignment, and CSV import / export. The buffered-editor
-architecture and the CellProfiler-style regex-from-filenames idea in
-this extension's v1.0.0 release both come from his work; the
-**[QuPath Metadata](https://forum.image.sc/t/qupath-metadata/80733/6)**
-thread on the image.sc forum (starting at post #6) is where he
-described the workflow that inspired the regex extraction surface here.
+Thanks to the people whose work this extension builds from:
 
-This extension's continued existence is a convenience: it already ships
-in the `qupath-catalog-mikenelson` catalog and shares a code path with
-the rest of the LOCI extensions. If you do not already use this catalog,
-Zindy's extension is the better starting point — it has a wider feature
-set, sees more development, and is the upstream reference for the
-architectural patterns adopted here.
+- **Egor Zindy** (`@EP.Zindy`) for
+  [`zindy/qupath-extension-project-metadata-editor`](https://github.com/zindy/qupath-extension-project-metadata-editor),
+  the broader and more actively-developed metadata editor for QuPath
+  (undo / redo, column add / rename / remove / copy, regex extraction
+  from filenames, Search & Replace, train / val / test split, CSV
+  import / export). **If you are not already on the
+  `qupath-catalog-mikenelson` catalog, start there.** This extension's
+  v1.0.0 buffered-editor architecture and CellProfiler-style
+  regex-from-filenames workflow come directly from his work and from
+  his description in the
+  **[QuPath Metadata](https://forum.image.sc/t/qupath-metadata/80733/6)**
+  thread on image.sc (post #6 onward).
+- **Pete Bankhead** for QuPath itself, and for the per-project rename
+  script that the v0.2.0 Metadata Keys tab's rename operation generalizes,
+  shared on the QuPath community forum at
+  [image.sc](https://forum.image.sc/) in response to a request by `sebg`.
+- The buffered-editor pattern itself (working copy + Command-pattern
+  undo / redo + commit on explicit Save) is the design QuPath core's
+  own built-in project-metadata editor used before it was extracted
+  upstream, and is the same architectural choice Zindy makes. It is
+  not original to either project.
 
-The project-wide rename script that the Metadata Keys tab's rename
-operation is modelled on was written by Pete Bankhead and shared on
-the QuPath community forum at [image.sc](https://forum.image.sc/) in
-response to a request by `sebg`. The tab generalizes that script and
-adds the matching removal operation, a usage count per key, and a
-no-undo confirmation gate.
-
-The v1.0.0 buffered editor model -- a working copy of project metadata
-edited in memory, with every action undoable and an explicit Save to
-commit -- follows the design QuPath core used in its built-in
-project-metadata editor and is the same architectural choice Zindy
-makes in his extension. The pattern is established and not original to
-either project. This extension's implementation is a clean-room rewrite
-inside the extension's existing code; no code was lifted from Zindy's
-extension or any other source.
+This extension continues to ship because it is already in the
+`qupath-catalog-mikenelson` catalog alongside the rest of the LOCI
+tooling. Its feature set is narrower than Zindy's; users who want a
+fuller project-metadata editor should prefer his extension.
 
 ## License
 
-Apache License 2.0 -- see [LICENSE](LICENSE).
+[GNU General Public License v3.0](LICENSE)
+
+This extension depends on [QuPath](https://qupath.github.io), which is
+licensed under GPL v3, so the running combination of QuPath + this
+extension is itself GPL v3. It also occupies the same problem space as
+Zindy's GPL v3
+[`qupath-extension-project-metadata-editor`](https://github.com/zindy/qupath-extension-project-metadata-editor)
+and adopts the same buffered-editor architecture used there and in
+QuPath core. We license this extension under the same terms so the
+ecosystem stays consistent. (Earlier releases through v1.0.0 carried
+an Apache-2.0 header; the source files are now GPL v3.)
