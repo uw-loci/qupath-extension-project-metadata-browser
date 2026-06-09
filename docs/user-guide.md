@@ -394,6 +394,30 @@ before reverting to the usual per-tab count text.
 </details>
 
 <details>
+<summary><strong>Concurrent Groovy script writes can be overwritten on Save</strong></summary>
+
+The browser loads a working copy of every entry's metadata when you
+open it (or last clicked Refresh). Subsequent edits live in that
+working copy until you click Save. If another QuPath script writes
+to a metadata key on an entry **while the browser is open and dirty**,
+your next Save can silently overwrite that script's change -- because
+the working copy started from a pre-script snapshot and Save commits
+the working copy's diff back to disk.
+
+Mitigations until v1.2 ships a three-way merge:
+
+- Avoid concurrent Groovy script mutations of project metadata while
+  the browser is open and dirty.
+- If a script must run during a session, click Save (or Discard) in
+  the browser first, then run the script, then click Refresh once the
+  script completes -- F5 / the Refresh button is intentionally
+  disabled while there are unsaved edits.
+- For batch metadata rewrites the safest pattern is "browser closed
+  while script runs" today.
+
+</details>
+
+<details>
 <summary><strong>Frequently asked questions</strong></summary>
 
 **Q. I made a mistake. How do I undo it?**

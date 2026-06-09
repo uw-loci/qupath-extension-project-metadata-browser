@@ -69,6 +69,7 @@ public final class RegexExtractionDialog {
     private final RadioButton overwriteRadio = new RadioButton("Overwrite -- replace any current value");
     private final RadioButton skipRadio = new RadioButton("Skip -- keep current values, leave non-collisions alone");
     private final RadioButton cancelRadio = new RadioButton("Cancel -- abort the extraction");
+    private final Label policyHintLabel = new Label(" ");
     private final CheckBox skipNonMatchingBox = new CheckBox("Skip non-matching entries (leave their cells unchanged)");
     private final TableView<RegexPreviewModel.PreviewRow> previewTable = new TableView<>();
     private final Label countsLabel = new Label(" ");
@@ -160,7 +161,15 @@ public final class RegexExtractionDialog {
         Label groupsLabel = new Label("Detected groups (rename column if needed):");
         groupsLabel.setStyle("-fx-font-weight: bold;");
 
-        VBox policyBox = new VBox(4, policyLabel, overwriteRadio, skipRadio, cancelRadio);
+        // policyHintLabel surfaces "Choose Overwrite or Skip to enable
+        // Apply." when the regex is valid AND >= 1 named group AND policy
+        // is still Cancel -- otherwise a user reads "Valid regex" and is
+        // baffled why Apply remains greyed.
+        policyHintLabel.setStyle("-fx-text-fill: #c80;");
+        policyHintLabel.setWrapText(true);
+        policyHintLabel.setVisible(false);
+        policyHintLabel.setManaged(false);
+        VBox policyBox = new VBox(4, policyLabel, overwriteRadio, skipRadio, cancelRadio, policyHintLabel);
 
         VBox body = new VBox(8,
                 top,
@@ -260,6 +269,9 @@ public final class RegexExtractionDialog {
     private void revalidate() {
         String regex = regexField.getText();
         Button applyBtn = (Button) dialog.getDialogPane().lookupButton(applyType);
+        // Default to hidden; only the "valid regex + groups detected +
+        // still on Cancel policy" path turns it on.
+        setPolicyHintVisible(false, null);
         if (regex == null || regex.isEmpty()) {
             validationLabel.setText("No named groups yet -- add (?<name>...) to extract.");
             validationLabel.setStyle("-fx-text-fill: #666;");
@@ -286,6 +298,16 @@ public final class RegexExtractionDialog {
         validationLabel.setStyle("-fx-text-fill: #666;");
         boolean policyOk = overwriteRadio.isSelected() || skipRadio.isSelected();
         applyBtn.setDisable(!policyOk);
+        if (!policyOk) {
+            setPolicyHintVisible(true, "Choose Overwrite or Skip to enable Apply.");
+        }
+    }
+
+    private void setPolicyHintVisible(boolean visible, String text) {
+        policyHintLabel.setVisible(visible);
+        policyHintLabel.setManaged(visible);
+        if (visible && text != null)
+            policyHintLabel.setText(text);
     }
 
     private Function<MutableEntryRow, String> sourceResolver() {

@@ -255,7 +255,11 @@ public class MetadataBrowserWindow {
         redoAliasItem.setVisible(false);
         MenuItem addColumnItem = new MenuItem("Add column...");
         addColumnItem.setOnAction(e -> addColumnViaDialog());
-        MenuItem extractItem = new MenuItem("Extract columns from filenames...");
+        // Label now includes "regex" for keyword discoverability -- a
+        // grad student searching for the regex feature in the menus would
+        // miss "Extract columns from filenames" without it.
+        MenuItem extractItem = new MenuItem("Extract columns from filenames (regex)...");
+        extractItem.setMnemonicParsing(false);
         extractItem.setOnAction(e -> openRegexExtraction());
         editMenu.getItems().addAll(undoItem, redoItem, redoAliasItem,
                 new SeparatorMenuItem(), addColumnItem, extractItem);
@@ -642,6 +646,13 @@ public class MetadataBrowserWindow {
     /**
      * Editable user-metadata cell. Paints a light-yellow background + amber
      * left-border when its value differs from the load-time snapshot.
+     *
+     * <p>Adds a Tab / Shift+Tab key handler that skips read-only built-in
+     * columns: JavaFX's default TableView Tab navigation lands on the next
+     * visible column regardless of editability, leaving focus on a cell
+     * the user can't enter edit mode on. The handler advances to the next
+     * user-key column (column userData == Boolean.TRUE), wrapping to the
+     * first user-key column on the next row when off the right edge.
      */
     private static final class EditableMetadataCell extends TextFieldTableCell<MutableEntryRow, String> {
         private final String metadataKey;
@@ -652,6 +663,81 @@ public class MetadataBrowserWindow {
             this.metadataKey = metadataKey;
             this.window = window;
             setWrapText(true);
+            addEventFilter(KeyEvent.KEY_PRESSED, this::handleKeyPress);
+        }
+
+        private void handleKeyPress(KeyEvent ev) {
+            if (ev.getCode() != KeyCode.TAB)
+                return;
+            // Only intercept while the cell is in edit mode -- outside of
+            // edit mode the JavaFX default focus traversal is fine.
+            if (!isEditing())
+                return;
+            boolean reverse = ev.isShiftDown();
+            TableView<MutableEntryRow> tv = getTableView();
+            TableColumn<MutableEntryRow, ?> currentCol = getTableColumn();
+            if (tv == null || currentCol == null)
+                return;
+            // Commit current edit before moving focus.
+            commitEdit(getConverter().fromString(
+                    getGraphic() instanceof TextField tf ? tf.getText() : getText()));
+            ev.consume();
+            int rowIdx = getIndex();
+            int currentColIdx = tv.getVisibleLeafColumns().indexOf(currentCol);
+            int[] target = findNextUserKeyCell(tv, rowIdx, currentColIdx, reverse);
+            if (target == null)
+                return;
+            int targetRow = target[0];
+            int targetColIdx = target[1];
+            TableColumn<MutableEntryRow, ?> targetCol =
+                    tv.getVisibleLeafColumns().get(targetColIdx);
+            tv.getSelectionModel().clearAndSelect(targetRow, targetCol);
+            tv.getFocusModel().focus(targetRow, targetCol);
+            tv.edit(targetRow, targetCol);
+        }
+
+        /**
+         * Return [row, visible-leaf-column-index] of the next editable
+         * user-key cell, scanning either forward or backward from the
+         * current position. Wraps row-wise: the last user-key column on
+         * row N goes to the first user-key column on row N+1; Shift+Tab
+         * on the first user-key column of row N goes to the last user-key
+         * column on row N-1. Returns null when no user-key column exists
+         * or the scan walks off the top/bottom of the table.
+         */
+        private static int[] findNextUserKeyCell(TableView<MutableEntryRow> tv,
+                                                  int startRow, int startCol,
+                                                  boolean reverse) {
+            List<TableColumn<MutableEntryRow, ?>> cols =
+                    new ArrayList<>(tv.getVisibleLeafColumns());
+            // Pre-compute the list of user-key visible column indexes.
+            List<Integer> userKeyCols = new ArrayList<>();
+            for (int i = 0; i < cols.size(); i++) {
+                if (Boolean.TRUE.equals(cols.get(i).getUserData()))
+                    userKeyCols.add(i);
+            }
+            if (userKeyCols.isEmpty())
+                return null;
+            int rowCount = tv.getItems().size();
+            if (!reverse) {
+                for (int idx : userKeyCols) {
+                    if (idx > startCol)
+                        return new int[] {startRow, idx};
+                }
+                // Wrap to first user-key column on next row.
+                if (startRow + 1 < rowCount)
+                    return new int[] {startRow + 1, userKeyCols.get(0)};
+                return null;
+            }
+            for (int i = userKeyCols.size() - 1; i >= 0; i--) {
+                int idx = userKeyCols.get(i);
+                if (idx < startCol)
+                    return new int[] {startRow, idx};
+            }
+            // Wrap to last user-key column on previous row.
+            if (startRow > 0)
+                return new int[] {startRow - 1, userKeyCols.get(userKeyCols.size() - 1)};
+            return null;
         }
 
         @Override
@@ -1032,12 +1118,30 @@ public class MetadataBrowserWindow {
             return true;
         List<WorkingCopy.EntryDiff> diffs = workingCopy.diff();
         int n = workingCopy.unsavedChangeCount();
+        MetadataKeyOperations.Result result;
         try {
-            MetadataKeyOperations.commitWorkingCopy(project, diffs);
+            result = MetadataKeyOperations.commitWorkingCopy(project, diffs);
         } catch (IOException ex) {
-            logger.error("Working-copy save failed", ex);
+            logger.error("Working-copy save failed; failed entry ids: {}",
+                    failedEntryIdsFromDiffs(diffs), ex);
             Dialogs.showErrorNotification("Project Metadata Browser",
                     "Could not save metadata. Reverted. Check that the project file is writable.");
+            return false;
+        }
+        if (!result.failedEntryIds().isEmpty()) {
+            // Partial-failure path: syncChanges() succeeded but one or more
+            // entries could not be mutated (missing entry, null metadata).
+            // Surface the IDs so the user can target the fix instead of
+            // hunting through logs. Working copy is NOT marked clean -- the
+            // dirty state for the un-mutated entries remains so the user
+            // can retry after addressing the underlying issue.
+            List<String> failed = result.failedEntryIds();
+            logger.warn("Working-copy save completed with {} failed entries: {}",
+                    failed.size(), failed);
+            Dialogs.showErrorNotification("Project Metadata Browser",
+                    formatPartialFailureMessage(failed));
+            // Reload so the working copy reflects the actually-saved state.
+            reloadFromProject();
             return false;
         }
         workingCopy.markClean();
@@ -1048,7 +1152,64 @@ public class MetadataBrowserWindow {
         return true;
     }
 
+    private static List<String> failedEntryIdsFromDiffs(List<WorkingCopy.EntryDiff> diffs) {
+        List<String> ids = new ArrayList<>(diffs.size());
+        for (WorkingCopy.EntryDiff d : diffs)
+            ids.add(d.entryId());
+        return ids;
+    }
+
+    /**
+     * Build the user-visible toast for a partial save failure: count of
+     * failed entries, hint to check writability, and the first three failed
+     * entry IDs (with a "+M more" suffix when truncated).
+     */
+    static String formatPartialFailureMessage(List<String> failedIds) {
+        int n = failedIds.size();
+        StringBuilder sb = new StringBuilder();
+        sb.append("Could not save ").append(n)
+                .append(n == 1 ? " entry. " : " entries. ")
+                .append("Check the project file is writable. Failed entries: ");
+        int show = Math.min(3, n);
+        for (int i = 0; i < show; i++) {
+            if (i > 0) sb.append(", ");
+            sb.append(failedIds.get(i));
+        }
+        int more = n - show;
+        if (more > 0)
+            sb.append(" (+").append(more).append(" more)");
+        sb.append(".");
+        return sb.toString();
+    }
+
+    /**
+     * Menu entry for File > Discard changes. Prompts for confirmation
+     * before discarding -- the close-prompt's Save / Discard / Cancel
+     * dialog already provides its own gate (and calls {@link #discardNow()}
+     * directly, bypassing this prompt to avoid a double-confirm).
+     */
     private void tryDiscard() {
+        if (!workingCopy.isDirty())
+            return;
+        int n = workingCopy.unsavedChangeCount();
+        // Confirm before the destructive reload -- File > Discard changes is
+        // a one-click menu item and the reload clears the undo stack, so an
+        // accidental click here would lose hours of work with no recovery.
+        String header = n == 1
+                ? "Discard 1 unsaved change? This cannot be undone."
+                : "Discard " + n + " unsaved changes? This cannot be undone.";
+        boolean confirmed = Dialogs.showYesNoDialog("Discard changes", header);
+        if (!confirmed)
+            return;
+        discardNow();
+    }
+
+    /**
+     * Discard the working copy and reload from the project without
+     * prompting. Used by the close-prompt's Discard button after the user
+     * has already confirmed in that prompt.
+     */
+    private void discardNow() {
         if (!workingCopy.isDirty())
             return;
         int n = workingCopy.unsavedChangeCount();
@@ -1092,8 +1253,10 @@ public class MetadataBrowserWindow {
         if (picked.get() == saveBt) {
             return trySave();
         }
-        // Discard
-        tryDiscard();
+        // Discard -- the user has just affirmatively clicked the Discard
+        // button on this prompt, so call discardNow() and skip the menu
+        // item's secondary confirmation.
+        discardNow();
         return true;
     }
 
