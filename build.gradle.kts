@@ -25,6 +25,11 @@ dependencies {
     testImplementation(libs.bundles.qupath)
     testImplementation("org.junit.jupiter:junit-jupiter:5.9.1")
     testImplementation(libs.bundles.logging)
+    // WorkingCopy + UndoStack expose ObservableList / ReadOnly*Property,
+    // so tests that touch them need the JavaFX modules on the compile path.
+    testImplementation("org.openjfx:javafx-base:17.0.2")
+    testImplementation("org.openjfx:javafx-graphics:17.0.2")
+    testImplementation("org.openjfx:javafx-controls:17.0.2")
 }
 
 tasks.withType<JavaCompile> {

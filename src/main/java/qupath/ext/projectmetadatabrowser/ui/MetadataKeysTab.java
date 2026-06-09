@@ -1,11 +1,11 @@
 package qupath.ext.projectmetadatabrowser.ui;
 
 import java.awt.image.BufferedImage;
-import java.io.IOException;
 import java.util.Comparator;
 import java.util.Objects;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
+import java.util.function.ToIntFunction;
 
 import javafx.beans.property.ReadOnlyStringWrapper;
 import javafx.collections.transformation.FilteredList;
@@ -36,21 +36,21 @@ import org.slf4j.LoggerFactory;
 
 import qupath.ext.projectmetadatabrowser.core.MetadataKeyOperations;
 import qupath.ext.projectmetadatabrowser.core.MetadataKeyOperations.CollisionPolicy;
+import qupath.ext.projectmetadatabrowser.core.RemoveColumnCommand;
+import qupath.ext.projectmetadatabrowser.core.RenameColumnCommand;
 import qupath.ext.projectmetadatabrowser.model.MetadataKeyRow;
 import qupath.ext.projectmetadatabrowser.model.MetadataModel;
+import qupath.ext.projectmetadatabrowser.model.MutableEntryRow;
+import qupath.ext.projectmetadatabrowser.model.WorkingCopy;
 import qupath.fx.dialogs.Dialogs;
 import qupath.lib.gui.QuPathGUI;
 import qupath.lib.projects.Project;
 
 /**
- * Tab content controller for the "Metadata Keys" tab in the Metadata Browser
- * window. Owns the keys {@link TableView}, the amber warning banner, the
- * filter / Rename / Delete toolbar, and the wiring back to the parent window
- * for cross-tab refresh after a mutation.
- *
- * <p>Single-select per Phase 1 (multi-select Delete deferred to v1.1). The
- * Rename and Delete buttons are disabled when no row is selected or when the
- * project is closed.
+ * Tab content controller for the "Metadata Keys" tab. v1.1 reshape:
+ * Rename and Delete actions now build {@link RenameColumnCommand} or
+ * {@link RemoveColumnCommand} and apply them via the parent window's undo
+ * stack. The on-disk {@code project.syncChanges()} happens at Save time.
  */
 public final class MetadataKeysTab {
 
@@ -61,6 +61,7 @@ public final class MetadataKeysTab {
     private final Runnable refreshCallback;
     private final Consumer<String> statusMessageHandler;
     private final Runnable countChangeListener;
+    private final Consumer<qupath.ext.projectmetadatabrowser.core.MetadataCommand> commandSink;
 
     private final BorderPane root = new BorderPane();
     private final TableView<MetadataKeyRow> table = new TableView<>();
@@ -74,31 +75,32 @@ public final class MetadataKeysTab {
      * @param qupath the QuPath GUI used to read the active project.
      * @param model the shared metadata model; this tab reads
      *              {@link MetadataModel#getKeyRows()}.
-     * @param refreshCallback a callback that triggers a full reload of both
-     *                        tabs after a successful mutation. Typically
-     *                        wired to {@code MetadataBrowserWindow.reloadFromProject()}.
-     * @param statusMessageHandler a consumer that posts a transient status
-     *                             message in the parent window's status line
-     *                             after a successful mutation. The parent
-     *                             owns the PauseTransition that reverts the
-     *                             message after ~5 seconds.
+     * @param refreshCallback callback that triggers a UI refresh after the
+     *                        working copy mutates.
+     * @param statusMessageHandler consumer that posts a transient status
+     *                             message in the parent window's status line.
+     * @param countChangeListener callback fired whenever the filtered / total
+     *                            key counts change.
+     * @param commandSink consumer that pushes a built
+     *                    {@link qupath.ext.projectmetadatabrowser.core.MetadataCommand}
+     *                    onto the parent window's undo stack.
      */
     public MetadataKeysTab(QuPathGUI qupath,
                            MetadataModel model,
                            Runnable refreshCallback,
                            Consumer<String> statusMessageHandler,
-                           Runnable countChangeListener) {
+                           Runnable countChangeListener,
+                           Consumer<qupath.ext.projectmetadatabrowser.core.MetadataCommand> commandSink) {
         this.qupath = Objects.requireNonNull(qupath, "qupath");
         this.model = Objects.requireNonNull(model, "model");
         this.refreshCallback = Objects.requireNonNull(refreshCallback, "refreshCallback");
         this.statusMessageHandler = Objects.requireNonNull(statusMessageHandler, "statusMessageHandler");
         this.countChangeListener = Objects.requireNonNull(countChangeListener, "countChangeListener");
+        this.commandSink = Objects.requireNonNull(commandSink, "commandSink");
 
         filtered = new FilteredList<>(model.getKeyRows(), r -> true);
         sorted = new SortedList<>(filtered);
         sorted.comparatorProperty().bind(table.comparatorProperty());
-        // Filter and model-size changes -> notify parent so the status line
-        // "Keys: N shown / N total" stays current.
         filtered.predicateProperty().addListener((obs, o, n) -> this.countChangeListener.run());
         filtered.addListener((javafx.collections.ListChangeListener<MetadataKeyRow>) c -> this.countChangeListener.run());
 
@@ -106,26 +108,14 @@ public final class MetadataKeysTab {
         root.setCenter(buildCenterRegion());
     }
 
-    /**
-     * The tab's root scene node. Wrap in a {@code Tab} at the caller site.
-     */
     public BorderPane getRoot() {
         return root;
     }
 
-    /**
-     * The current count of visible (post-filter) keys for the parent
-     * window's status line.
-     */
     public int getFilteredKeyCount() {
         return filtered.size();
     }
 
-    /**
-     * The total number of keys in the model. Use with
-     * {@link #getFilteredKeyCount()} to compose the "Keys: N shown / N total"
-     * status text.
-     */
     public int getTotalKeyCount() {
         return model.getKeyRows().size();
     }
@@ -133,7 +123,7 @@ public final class MetadataKeysTab {
     private VBox buildTopRegion() {
         Label banner = new Label(
                 "[!] Renaming or deleting a key changes every image entry that uses it. "
-                        + "This cannot be undone -- back up the project first if you are unsure. "
+                        + "Both actions go on the undo stack (Ctrl+Z) and commit to disk when you Save. "
                         + "(See User Guide -> Metadata Keys.)");
         banner.setWrapText(true);
         banner.setMaxWidth(Double.MAX_VALUE);
@@ -148,12 +138,12 @@ public final class MetadataKeysTab {
         HBox.setHgrow(filterField, Priority.ALWAYS);
 
         renameButton.setTooltip(new Tooltip(
-                "Rename the selected key everywhere it appears in the project."));
+                "Rename the selected key everywhere it appears in the project. Undoable."));
         renameButton.setDisable(true);
         renameButton.setOnAction(e -> onRename());
 
         deleteButton.setTooltip(new Tooltip(
-                "Remove the selected key from every entry that has it. Cannot be undone."));
+                "Remove the selected key from every entry that has it. Undoable until Save."));
         deleteButton.setDisable(true);
         deleteButton.setOnAction(e -> onDelete());
 
@@ -186,7 +176,6 @@ public final class MetadataKeysTab {
         keyCol.setPrefWidth(220);
         keyCol.setMinWidth(80);
         keyCol.setSortable(true);
-        // Case-insensitive sort so uppercase keys do not bubble above lowercase.
         keyCol.setComparator(Comparator.comparing(String::toLowerCase));
 
         TableColumn<MetadataKeyRow, MetadataKeyRow> usedByCol = new TableColumn<>("Used by");
@@ -210,14 +199,9 @@ public final class MetadataKeysTab {
         table.getColumns().add(sampleCol);
         table.getSortOrder().add(keyCol);
 
-        // Selection -> button enable/disable.
         table.getSelectionModel().selectedItemProperty().addListener((obs, o, n) -> updateButtonStates());
-
-        // Refresh button states when the model is reloaded (the selected row may
-        // disappear or its count may drop to zero).
         model.getKeyRows().addListener((javafx.collections.ListChangeListener<MetadataKeyRow>) c -> updateButtonStates());
 
-        // Right-click context menu mirrors the toolbar buttons.
         ContextMenu rowMenu = new ContextMenu();
         MenuItem renameItem = new MenuItem("Rename...");
         renameItem.setOnAction(e -> onRename());
@@ -238,10 +222,6 @@ public final class MetadataKeysTab {
         return table;
     }
 
-    /**
-     * Focus the filter field. Convenience for the parent window to call when
-     * the Keys tab is activated by a keyboard shortcut.
-     */
     public void requestFilterFocus() {
         filterField.requestFocus();
     }
@@ -276,40 +256,31 @@ public final class MetadataKeysTab {
             return;
         }
 
-        String oldKeyForCounter = selected.getKey();
+        String oldKey = selected.getKey();
+        ToIntFunction<String> collisionCounter = candidate ->
+                countWorkingCopyCollisions(model.getWorkingCopy(), oldKey, candidate);
         RenameKeyDialog.Result result = RenameKeyDialog.showFor(
                 root.getScene() == null ? null : root.getScene().getWindow(),
-                oldKeyForCounter,
+                oldKey,
                 selected.getEntryCount(),
-                candidateNewKey -> MetadataKeyOperations.countCollisions(
-                        project, oldKeyForCounter, candidateNewKey));
+                collisionCounter);
         if (result == null)
             return;
 
-        String oldKey = selected.getKey();
         String newKey = result.newKey();
         CollisionPolicy policy = result.policy();
-        try {
-            MetadataKeyOperations.Result opResult =
-                    MetadataKeyOperations.renameAcrossProject(project, oldKey, newKey, policy);
-            String message;
-            if (opResult.mutated() == 1) {
-                message = "Renamed '" + oldKey + "' to '" + newKey + "' on 1 entry.";
-            } else {
-                message = "Renamed '" + oldKey + "' to '" + newKey + "' across "
-                        + opResult.mutated() + " entries.";
-            }
-            logger.info(message);
-            statusMessageHandler.accept(message);
-            refreshCallback.run();
-            selectKeyAfterRefresh(newKey);
-        } catch (IOException e) {
-            logger.error("Rename of '{}' -> '{}' failed; changes reverted", oldKey, newKey, e);
-            Dialogs.showErrorNotification("Project Metadata Browser",
-                    "Could not save metadata changes. Reverted. "
-                            + "Check that the project file is writable.");
-            refreshCallback.run();
-        }
+        RenameColumnCommand command = new RenameColumnCommand(oldKey, newKey, policy);
+        commandSink.accept(command);
+        String message;
+        int n = command.affectedEntryCount();
+        if (n == 1)
+            message = "Renamed '" + oldKey + "' to '" + newKey + "' on 1 entry. Save to commit.";
+        else
+            message = "Renamed '" + oldKey + "' to '" + newKey + "' across " + n + " entries. Save to commit.";
+        logger.info(message);
+        statusMessageHandler.accept(message);
+        refreshCallback.run();
+        selectKeyAfterRefresh(newKey);
     }
 
     private void onDelete() {
@@ -328,65 +299,46 @@ public final class MetadataKeysTab {
         String entriesWord = (n == 1) ? "1 entry" : n + " entries";
         String deleteLabel = (n == 1) ? "Delete from 1 entry" : "Delete from " + n + " entries";
 
-        // Build the confirmation Alert manually so we can apply the destructive
-        // -fx-base styling and set focus to Cancel, per design 02a Section 4.
         Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
         alert.setTitle("Delete metadata key");
         alert.setHeaderText("[!] Delete the metadata key \"" + key + "\"?");
-        alert.setContentText("This key will be removed from " + entriesWord + ". "
-                + "This cannot be undone. Back up the project first if you are unsure.");
+        alert.setContentText("This key will be removed from " + entriesWord + " in the working copy. "
+                + "The change is undoable (Ctrl+Z) until you Save.");
         if (root.getScene() != null && root.getScene().getWindow() != null)
             alert.initOwner(root.getScene().getWindow());
 
         ButtonType deleteType = new ButtonType(deleteLabel, ButtonBar.ButtonData.OK_DONE);
         alert.getButtonTypes().setAll(deleteType, ButtonType.CANCEL);
 
-        // Style the destructive button. Don't make it the default; Cancel is the
-        // cancel button. Enter is a no-op on this alert.
         Button deleteBtn = (Button) alert.getDialogPane().lookupButton(deleteType);
         deleteBtn.setStyle("-fx-base: #c33;");
         deleteBtn.setDefaultButton(false);
         deleteBtn.setTooltip(new Tooltip(
-                "Remove this metadata key from " + entriesWord + ". This cannot be undone."));
+                "Remove this metadata key from " + entriesWord + ". Undoable until Save."));
 
         Button cancelBtn = (Button) alert.getDialogPane().lookupButton(ButtonType.CANCEL);
         cancelBtn.setDefaultButton(false);
         cancelBtn.setCancelButton(true);
         cancelBtn.setTooltip(new Tooltip("Close without removing any keys."));
-        // Schedule focus on Cancel after the alert lays out -- if we requestFocus
-        // synchronously the Alert's default-button machinery may steal it back.
         javafx.application.Platform.runLater(cancelBtn::requestFocus);
 
         java.util.Optional<ButtonType> choice = alert.showAndWait();
         if (choice.isEmpty() || choice.get() != deleteType)
             return;
 
-        try {
-            MetadataKeyOperations.Result opResult =
-                    MetadataKeyOperations.removeAcrossProject(project, key);
-            String message;
-            if (opResult.mutated() == 1) {
-                message = "Removed '" + key + "' from 1 entry.";
-            } else {
-                message = "Removed '" + key + "' from " + opResult.mutated() + " entries.";
-            }
-            logger.info(message);
-            statusMessageHandler.accept(message);
-            refreshCallback.run();
-        } catch (IOException e) {
-            logger.error("Remove of '{}' failed; changes reverted", key, e);
-            Dialogs.showErrorNotification("Project Metadata Browser",
-                    "Could not save metadata changes. Reverted. "
-                            + "Check that the project file is writable.");
-            refreshCallback.run();
-        }
+        RemoveColumnCommand command = new RemoveColumnCommand(key);
+        commandSink.accept(command);
+        int affected = command.affectedEntryCount();
+        String message;
+        if (affected == 1)
+            message = "Removed '" + key + "' from 1 entry. Save to commit.";
+        else
+            message = "Removed '" + key + "' from " + affected + " entries. Save to commit.";
+        logger.info(message);
+        statusMessageHandler.accept(message);
+        refreshCallback.run();
     }
 
-    /**
-     * After a refresh, try to restore selection to {@code key}. If the model
-     * no longer contains it (e.g. the rename produced a key that was filtered
-     * out), clear selection.
-     */
     private void selectKeyAfterRefresh(String key) {
         for (MetadataKeyRow row : sorted) {
             if (row.getKey().equals(key)) {
@@ -396,6 +348,24 @@ public final class MetadataKeysTab {
             }
         }
         table.getSelectionModel().clearSelection();
+    }
+
+    /**
+     * Working-copy equivalent of
+     * {@link MetadataKeyOperations#countCollisions} -- count entries that
+     * currently have BOTH {@code oldKey} and {@code newKey} set.
+     */
+    private static int countWorkingCopyCollisions(WorkingCopy wc, String oldKey, String newKey) {
+        if (oldKey == null || newKey == null || oldKey.isBlank() || newKey.isBlank())
+            return 0;
+        if (oldKey.equals(newKey))
+            return 0;
+        int count = 0;
+        for (MutableEntryRow row : wc.getRows()) {
+            if (row.hasMetadata(oldKey) && row.hasMetadata(newKey))
+                count++;
+        }
+        return count;
     }
 
     /** Show the full key string in a tooltip on hover. */

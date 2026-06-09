@@ -23,23 +23,28 @@ import javafx.scene.layout.VBox;
 import javafx.stage.Stage;
 import javafx.stage.Window;
 
-import qupath.ext.projectmetadatabrowser.model.EntryRow;
+import qupath.ext.projectmetadatabrowser.model.MutableEntryRow;
 
 /**
- * Modal dialog for editing metadata on a single {@link EntryRow}. Presents
- * every current metadata key as an editable text field, plus a row for adding
- * a brand-new key/value pair.
+ * Modal dialog for editing the working-copy metadata of a single
+ * {@link MutableEntryRow}. v1.1 returns a delta {@code Map<String,String>}
+ * (the user's changes); the caller wraps that into a
+ * {@link qupath.ext.projectmetadatabrowser.core.BulkSetCellsCommand} and
+ * applies it to the working copy. The dialog no longer mutates the entry
+ * or calls {@code project.syncChanges()}.
  */
-public class MetadataEditDialog {
+public final class MetadataEditDialog {
+
+    private MetadataEditDialog() {
+        // utility class -- no instances
+    }
 
     /**
-     * Show the dialog, block until the user commits or cancels, and return
-     * the map of changes that were applied to the row. Returns an empty map
-     * if the user cancelled or made no changes. The returned map describes
-     * the user's delta -- blank values indicate keys to remove, non-blank
+     * Show the dialog modally and return the user's delta (or an empty map
+     * on cancel / no-op). Blank values indicate keys to remove; non-blank
      * values indicate additions or updates.
      */
-    public static Map<String, String> showFor(Window owner, EntryRow row) {
+    public static Map<String, String> showFor(Window owner, MutableEntryRow row) {
         Objects.requireNonNull(row, "row");
 
         Dialog<Map<String, String>> dialog = new Dialog<>();
@@ -52,7 +57,7 @@ public class MetadataEditDialog {
         dialog.getDialogPane().getButtonTypes().addAll(okType, ButtonType.CANCEL);
 
         // Existing keys, sorted alphabetically for stability.
-        Map<String, String> original = new TreeMap<>(row.snapshotMetadata());
+        Map<String, String> original = new TreeMap<>(row.snapshotWorking());
 
         GridPane grid = new GridPane();
         grid.setHgap(8);
@@ -92,7 +97,8 @@ public class MetadataEditDialog {
         Label hint = new Label(original.isEmpty()
                 ? "This image has no metadata yet. Fill in the row below to add one."
                 : "Clear a value (or enter whitespace only) to remove that "
-                        + "metadata entry. Fill in the last row to add a new key.");
+                        + "metadata entry. Fill in the last row to add a new key. "
+                        + "Edits stay in the working copy until you Save.");
         hint.setWrapText(true);
 
         ScrollPane scroller = new ScrollPane(grid);
@@ -103,7 +109,6 @@ public class MetadataEditDialog {
         dialog.getDialogPane().setContent(content);
         dialog.setResizable(true);
 
-        // Size the dialog so long tables scroll rather than stretching forever.
         Scene scene = dialog.getDialogPane().getScene();
         if (scene != null && scene.getWindow() instanceof Stage stage) {
             stage.setMinWidth(520);
@@ -117,10 +122,8 @@ public class MetadataEditDialog {
             for (KeyFieldPair f : fields) {
                 String newVal = trimToEmpty(f.valueField.getText());
                 String oldVal = trimToEmpty(original.get(f.key));
-                if (!Objects.equals(newVal, oldVal)) {
-                    // Blank values signal deletion via applyMetadataChanges.
+                if (!Objects.equals(newVal, oldVal))
                     updates.put(f.key, newVal);
-                }
             }
             String k = newKey.getText();
             String v = newValue.getText();
@@ -133,9 +136,7 @@ public class MetadataEditDialog {
         Optional<Map<String, String>> result = dialog.showAndWait();
         if (result.isEmpty() || result.get().isEmpty())
             return java.util.Collections.emptyMap();
-        Map<String, String> updates = result.get();
-        row.applyMetadataChanges(updates);
-        return updates;
+        return result.get();
     }
 
     private static String trimToEmpty(String s) {

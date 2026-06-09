@@ -13,6 +13,7 @@ import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import qupath.ext.projectmetadatabrowser.model.WorkingCopy;
 import qupath.lib.projects.Project;
 import qupath.lib.projects.ProjectImageEntry;
 
@@ -309,6 +310,94 @@ public final class MetadataKeyOperations {
      * @return number of entries with both keys set; 0 if either argument is
      *         null or blank.
      */
+    /**
+     * Commit a list of per-entry diffs from a buffered-editor working copy.
+     * Same protocol as {@link #renameAcrossProject}: per-entry snapshot,
+     * synchronized mutation, single {@code project.syncChanges()}, rollback
+     * on {@link IOException} with suppressed-exception chaining.
+     *
+     * <p>This is the only {@code syncChanges()} callsite for normal save
+     * operations -- per-image edits, inline cell edits, Excel paste, import,
+     * regex extraction, key rename, and key delete all flow through here.
+     *
+     * @param project the project to mutate. Must not be null.
+     * @param diffs per-entry diffs produced by {@code workingCopy.diff()}.
+     *              May be empty; an empty list still calls
+     *              {@code syncChanges()} so the project file mtime
+     *              reflects the user's Save intent.
+     * @return a {@link Result} reporting how many entries were mutated.
+     * @throws IOException if {@code project.syncChanges()} fails; in-memory
+     *                     changes are reverted before the throw.
+     */
+    public static Result commitWorkingCopy(Project<BufferedImage> project,
+                                            List<WorkingCopy.EntryDiff> diffs) throws IOException {
+        Objects.requireNonNull(project, "project");
+        Objects.requireNonNull(diffs, "diffs");
+
+        Map<String, ProjectImageEntry<BufferedImage>> byId = new HashMap<>();
+        for (ProjectImageEntry<BufferedImage> entry : project.getImageList())
+            byId.put(entry.getID(), entry);
+
+        Map<String, Map<String, String>> snapshots = new HashMap<>();
+        List<ProjectImageEntry<BufferedImage>> touched = new ArrayList<>();
+        List<String> failed = new ArrayList<>();
+        int mutated = 0;
+
+        for (WorkingCopy.EntryDiff diff : diffs) {
+            ProjectImageEntry<BufferedImage> entry = byId.get(diff.entryId());
+            if (entry == null) {
+                failed.add(diff.entryId());
+                continue;
+            }
+            Map<String, String> md = entry.getMetadata();
+            if (md == null) {
+                failed.add(diff.entryId());
+                continue;
+            }
+            synchronized (md) {
+                snapshots.put(entry.getID(), new HashMap<>(md));
+                touched.add(entry);
+                for (Map.Entry<String, String> e : diff.toSet().entrySet()) {
+                    if (e.getKey() == null)
+                        continue;
+                    String value = e.getValue();
+                    if (value == null || value.isEmpty())
+                        md.remove(e.getKey());
+                    else
+                        md.put(e.getKey(), value);
+                }
+                for (String key : diff.toRemove()) {
+                    if (key != null)
+                        md.remove(key);
+                }
+                mutated++;
+            }
+        }
+
+        try {
+            project.syncChanges();
+        } catch (IOException e) {
+            logger.error("syncChanges failed during working-copy commit; rolling back {} entries",
+                    touched.size(), e);
+            List<Throwable> revertFailures = new ArrayList<>();
+            try {
+                revertSnapshots(touched, snapshots, revertFailures);
+            } finally {
+                try {
+                    project.syncChanges();
+                } catch (IOException syncEx) {
+                    logger.error("Second syncChanges() after rollback also failed for working-copy commit",
+                            syncEx);
+                    e.addSuppressed(syncEx);
+                }
+                for (Throwable revertEx : revertFailures)
+                    e.addSuppressed(revertEx);
+            }
+            throw e;
+        }
+        return new Result(mutated, failed);
+    }
+
     public static int countCollisions(Project<BufferedImage> project,
                                        String oldKey,
                                        String newKey) {

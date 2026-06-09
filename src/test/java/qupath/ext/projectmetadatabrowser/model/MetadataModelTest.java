@@ -1,6 +1,7 @@
 package qupath.ext.projectmetadatabrowser.model;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.image.BufferedImage;
@@ -24,15 +25,14 @@ class MetadataModelTest {
 
         List<String> keys = MetadataModel.unionMetadataKeys(Arrays.asList(a, b, c));
 
-        // Alphabetically sorted union
         assertEquals(List.of("modality", "objective", "sample_name"), keys);
     }
 
     @Test
-    void entryRowExposesBuiltInFieldsAndMetadata() {
+    void mutableEntryRowExposesBuiltInFieldsAndMetadata() {
         ProjectImageEntry<BufferedImage> entry = new StubEntry("img-1",
                 Map.of("modality", "ppm"));
-        EntryRow row = new EntryRow(entry);
+        MutableEntryRow row = new MutableEntryRow(entry);
 
         assertEquals("img-1", row.getName());
         assertEquals("img-1", row.getId());
@@ -41,65 +41,58 @@ class MetadataModelTest {
     }
 
     @Test
-    void applyMetadataChangesAddsUpdatesAndRemoves() {
+    void putWorkingValueAddsUpdatesAndRemoves() {
         StubEntry entry = new StubEntry("e",
                 Map.of("keepMe", "1", "removeMe", "bye"));
-        EntryRow row = new EntryRow(entry);
+        MutableEntryRow row = new MutableEntryRow(entry);
 
-        row.applyMetadataChanges(Map.of(
-                "keepMe", "2",          // update
-                "removeMe", "",         // empty -> remove
-                "newKey", "fresh"       // add
-        ));
+        row.putWorkingValue("keepMe", "2");
+        row.removeWorkingKey("removeMe");
+        row.putWorkingValue("newKey", "fresh");
 
-        Map<String, String> md = entry.getMetadata();
+        Map<String, String> md = row.snapshotWorking();
         assertEquals("2", md.get("keepMe"));
         assertEquals("fresh", md.get("newKey"));
-        assertTrue(!md.containsKey("removeMe"));
+        assertFalse(md.containsKey("removeMe"));
     }
 
     @Test
-    void applyMetadataChangesTreatsWhitespaceValueAsDelete() {
+    void putWorkingValueEmptyOrNullTreatsAsRemove() {
         StubEntry entry = new StubEntry("e", Map.of("k", "v"));
-        EntryRow row = new EntryRow(entry);
+        MutableEntryRow row = new MutableEntryRow(entry);
 
-        row.applyMetadataChanges(java.util.Collections.singletonMap("k", "   "));
+        row.putWorkingValue("k", "");
+        assertFalse(row.hasMetadata("k"));
 
-        assertTrue(!entry.getMetadata().containsKey("k"));
+        row.putWorkingValue("k", "v");
+        row.putWorkingValue("k", null);
+        assertFalse(row.hasMetadata("k"));
     }
 
     @Test
-    void applyMetadataChangesIgnoresNullKey() {
-        StubEntry entry = new StubEntry("e", Map.of("k", "v"));
-        EntryRow row = new EntryRow(entry);
-
-        row.applyMetadataChanges(java.util.Collections.singletonMap(null, "x"));
-
-        assertEquals("v", entry.getMetadata().get("k"));
-        assertEquals(1, entry.getMetadata().size());
-    }
-
-    @Test
-    void revertChangesUndoesOnlyEditedKeys() {
+    void isDirtyTrackesPerCellChanges() {
         StubEntry entry = new StubEntry("e", Map.of("a", "1"));
-        EntryRow row = new EntryRow(entry);
-        Map<String, String> snap = row.snapshotMetadata();
+        MutableEntryRow row = new MutableEntryRow(entry);
 
-        // Simulate the user's edit: change "a" from 1 -> 2, add "b".
-        Map<String, String> updates = new java.util.HashMap<>();
-        updates.put("a", "2");
-        updates.put("b", "new");
-        row.applyMetadataChanges(updates);
-        assertEquals("2", entry.getMetadata().get("a"));
-        assertEquals("new", entry.getMetadata().get("b"));
+        assertFalse(row.isDirty());
 
-        // Simulate a concurrent script adding a different key.
-        entry.getMetadata().put("script_key", "script_val");
+        row.putWorkingValue("a", "2");
+        assertTrue(row.isDirty());
+        assertTrue(row.isCellDirty("a"));
 
-        // Revert the user's edits -- script_key must survive.
-        row.revertChanges(updates, snap);
-        assertEquals("1", entry.getMetadata().get("a"));
-        assertTrue(!entry.getMetadata().containsKey("b"));
-        assertEquals("script_val", entry.getMetadata().get("script_key"));
+        row.putWorkingValue("a", "1");
+        assertFalse(row.isDirty());
+        assertFalse(row.isCellDirty("a"));
+    }
+
+    @Test
+    void markCleanResetsOriginalSnapshot() {
+        StubEntry entry = new StubEntry("e", Map.of("a", "1"));
+        MutableEntryRow row = new MutableEntryRow(entry);
+
+        row.putWorkingValue("a", "2");
+        assertTrue(row.isDirty());
+        row.markClean();
+        assertFalse(row.isDirty());
     }
 }

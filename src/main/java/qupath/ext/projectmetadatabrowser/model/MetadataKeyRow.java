@@ -8,9 +8,9 @@ import java.util.Objects;
  * image entries currently set it and a sample value (with the name of the
  * entry the sample came from).
  *
- * <p>Mirrors {@link EntryRow}'s "snapshot view, no JavaFX properties" style:
- * cell value factories pull the fields directly. The row is immutable; a new
- * list is rebuilt by {@code MetadataModel.loadFrom} on every reload.
+ * <p>Snapshot view -- no JavaFX properties; cell value factories pull the
+ * fields directly. The row is immutable; a new list is rebuilt by
+ * {@code MetadataModel.loadFrom} on every reload.
  */
 public final class MetadataKeyRow {
 
