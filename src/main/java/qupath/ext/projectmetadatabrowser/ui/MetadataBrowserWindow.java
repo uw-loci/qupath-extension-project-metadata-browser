@@ -349,6 +349,11 @@ public class MetadataBrowserWindow {
             model.rebuildKeyRows();
             table.refresh();
             updateStatusLabel();
+            // Save / Discard label counters also need a refresh on every
+            // command (the dirty boolean only fires on transitions; without
+            // this, "Save (N changes)" gets stuck at the value seen when
+            // dirty first turned true).
+            updateSaveDiscardMenus();
         });
         workingCopy.dirtyProperty().addListener((obs, o, n) -> {
             updateTitle();
@@ -934,7 +939,8 @@ public class MetadataBrowserWindow {
             }
             msg.append(" ").append(n)
                     .append(n == 1 ? " column (" : " columns (")
-                    .append(list).append(") read-only and skipped.");
+                    .append(list)
+                    .append(n == 1 ? ") is read-only and was skipped." : ") are read-only and were skipped.");
         }
         showTransientStatusMessage(msg.toString());
     }
