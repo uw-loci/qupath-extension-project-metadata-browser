@@ -1,5 +1,16 @@
 # Project Metadata Browser — User Guide
 
+> **Considering a project-metadata editor for QuPath?** Egor Zindy's
+> [`qupath-extension-project-metadata-editor`](https://github.com/zindy/qupath-extension-project-metadata-editor)
+> is the broader, upstream tool — start there if you do not already
+> use the `qupath-catalog-mikenelson` catalog. It implements the
+> CellProfiler-style regex extraction workflow he described in the
+> [QuPath Metadata thread on image.sc](https://forum.image.sc/t/qupath-metadata/80733/6)
+> (post #6 onward), which is also the source of inspiration for this
+> extension's v1.0.0 regex feature. This extension shares its catalog
+> with the rest of the LOCI tooling; that convenience is why it
+> continues to ship.
+
 **Coming from v0.2.0?** The browser now works as a buffered editor: your
 edits accumulate in a working copy and commit to disk only when you click
 **Save**. Rename, delete, per-image edits, inline cell edits, paste,

@@ -93,6 +93,26 @@ For general support and feature requests, please post on the [image.sc forum](ht
 
 ## Source / prior art
 
+**If you are looking for a QuPath project-metadata editor, look at
+[`zindy/qupath-extension-project-metadata-editor`](https://github.com/zindy/qupath-extension-project-metadata-editor)
+first.** Egor Zindy (`@EP.Zindy`) extracted QuPath's built-in
+project-metadata editor into a standalone extension and has been
+extending it actively — undo / redo, column add / rename / remove /
+copy, regex extraction from filenames, Search & Replace, train / val /
+test split assignment, and CSV import / export. The buffered-editor
+architecture and the CellProfiler-style regex-from-filenames idea in
+this extension's v1.0.0 release both come from his work; the
+**[QuPath Metadata](https://forum.image.sc/t/qupath-metadata/80733/6)**
+thread on the image.sc forum (starting at post #6) is where he
+described the workflow that inspired the regex extraction surface here.
+
+This extension's continued existence is a convenience: it already ships
+in the `qupath-catalog-mikenelson` catalog and shares a code path with
+the rest of the LOCI extensions. If you do not already use this catalog,
+Zindy's extension is the better starting point — it has a wider feature
+set, sees more development, and is the upstream reference for the
+architectural patterns adopted here.
+
 The project-wide rename script that the Metadata Keys tab's rename
 operation is modelled on was written by Pete Bankhead and shared on
 the QuPath community forum at [image.sc](https://forum.image.sc/) in
@@ -100,12 +120,14 @@ response to a request by `sebg`. The tab generalizes that script and
 adds the matching removal operation, a usage count per key, and a
 no-undo confirmation gate.
 
-The v1.1 buffered editor model -- a working copy of project metadata
+The v1.0.0 buffered editor model -- a working copy of project metadata
 edited in memory, with every action undoable and an explicit Save to
 commit -- follows the design QuPath core used in its built-in
-project-metadata editor. The pattern is established and not original
-to this extension; the implementation here is a clean-room rewrite
-inside the extension's existing code.
+project-metadata editor and is the same architectural choice Zindy
+makes in his extension. The pattern is established and not original to
+either project. This extension's implementation is a clean-room rewrite
+inside the extension's existing code; no code was lifted from Zindy's
+extension or any other source.
 
 ## License
 
