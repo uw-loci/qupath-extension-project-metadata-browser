@@ -23,7 +23,7 @@ public class ProjectMetadataBrowserExtension implements QuPathExtension {
     private static final String EXTENSION_NAME = "Project Metadata Browser";
     private static final String EXTENSION_DESCRIPTION =
             "Browse, filter, and edit metadata for all images in a QuPath project.";
-    private static final Version EXTENSION_QUPATH_VERSION = Version.parse("v0.6.0");
+    private static final Version EXTENSION_QUPATH_VERSION = Version.parse("v0.7.0");
 
     private boolean isInstalled = false;
 

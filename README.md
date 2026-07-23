@@ -85,7 +85,7 @@ folder, or drag it onto the main QuPath window.
 ./gradlew shadowJar
 ```
 
-Requires QuPath 0.6.0+ and Java 21.
+Requires QuPath 0.7.0+ and Java 21.
 
 ## Support
 
