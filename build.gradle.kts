@@ -7,7 +7,7 @@ plugins {
 qupathExtension {
     name = "qupath-extension-project-metadata-browser"
     group = "io.github.michaelsnelson"
-    version = "1.0.0"
+    version = "1.0.1"
     description = "Browse, filter, and edit metadata for all images in a QuPath project."
     automaticModule = "io.github.michaelsnelson.extension.projectmetadatabrowser"
 }

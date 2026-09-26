@@ -351,6 +351,7 @@ public class MetadataBrowserWindow {
         // title bar and menu counters in sync with dirty state.
         workingCopy.tickProperty().addListener((obs, o, n) -> {
             model.rebuildKeyRows();
+            syncColumnsWithWorkingCopy();
             table.refresh();
             updateStatusLabel();
             // Save / Discard label counters also need a refresh on every
@@ -455,38 +456,9 @@ public class MetadataBrowserWindow {
                 selectedIds.add(r.getId());
         }
 
-        Map<String, Boolean> visibilityByHeader = new HashMap<>();
-        for (TableColumn<MutableEntryRow, ?> c : table.getColumns())
-            visibilityByHeader.put(c.getText(), c.isVisible());
-
-        String sortHeader = null;
-        TableColumn.SortType sortType = null;
-        if (!table.getSortOrder().isEmpty()) {
-            TableColumn<MutableEntryRow, ?> primary = table.getSortOrder().get(0);
-            sortHeader = primary.getText();
-            sortType = primary.getSortType();
-        }
-
         model.loadFrom(project);
-        rebuildColumns();
+        rebuildColumnsPreservingState();
         undoStack.clear();
-
-        for (TableColumn<MutableEntryRow, ?> c : table.getColumns()) {
-            Boolean visible = visibilityByHeader.get(c.getText());
-            if (visible != null)
-                c.setVisible(visible);
-        }
-
-        if (sortHeader != null) {
-            for (TableColumn<MutableEntryRow, ?> c : table.getColumns()) {
-                if (sortHeader.equals(c.getText())) {
-                    c.setSortType(sortType);
-                    table.getSortOrder().clear();
-                    table.getSortOrder().add(c);
-                    break;
-                }
-            }
-        }
 
         table.setPlaceholder(new Label(project == null
                 ? "No project open."
@@ -507,7 +479,75 @@ public class MetadataBrowserWindow {
         }
     }
 
+    /** Column property carrying the user-metadata key a column shows (absent on built-ins). */
+    private static final String METADATA_KEY_PROP = "projectMetadataBrowser.metadataKey";
+
     private final Map<String, java.util.function.Function<MutableEntryRow, String>> columnResolvers = new HashMap<>();
+
+    /**
+     * Bring the table's user-key columns in line with the working copy after a
+     * command changed the key set: regex extraction, Add column, key rename or
+     * delete, import, and their undo/redo. Cell-only commands leave the key
+     * list unchanged and skip the rebuild. Before 1.0.1 nothing rebuilt the
+     * columns until Refresh, so a freshly extracted or renamed column was
+     * invisible in the Entries tab until the user saved and reloaded.
+     */
+    private void syncColumnsWithWorkingCopy() {
+        List<String> shown = new ArrayList<>();
+        for (TableColumn<MutableEntryRow, ?> c : table.getColumns()) {
+            Object key = c.getProperties().get(METADATA_KEY_PROP);
+            if (key instanceof String s)
+                shown.add(s);
+        }
+        if (shown.equals(new ArrayList<>(workingCopy.getColumnKeys())))
+            return;
+        rebuildColumnsPreservingState();
+    }
+
+    /**
+     * {@link #rebuildColumns()} plus restoration of per-column visibility and
+     * width (matched by header text) and the primary sort column, so a rebuild
+     * does not undo the user's Columns menu choices, Fit Columns sizing or sort.
+     */
+    private void rebuildColumnsPreservingState() {
+        Map<String, Boolean> visibilityByHeader = new HashMap<>();
+        Map<String, Double> widthByHeader = new HashMap<>();
+        for (TableColumn<MutableEntryRow, ?> c : table.getColumns()) {
+            visibilityByHeader.put(c.getText(), c.isVisible());
+            if (c.getWidth() > 0)
+                widthByHeader.put(c.getText(), c.getWidth());
+        }
+
+        String sortHeader = null;
+        TableColumn.SortType sortType = null;
+        if (!table.getSortOrder().isEmpty()) {
+            TableColumn<MutableEntryRow, ?> primary = table.getSortOrder().get(0);
+            sortHeader = primary.getText();
+            sortType = primary.getSortType();
+        }
+
+        rebuildColumns();
+
+        for (TableColumn<MutableEntryRow, ?> c : table.getColumns()) {
+            Boolean visible = visibilityByHeader.get(c.getText());
+            if (visible != null)
+                c.setVisible(visible);
+            Double width = widthByHeader.get(c.getText());
+            if (width != null)
+                c.setPrefWidth(width);
+        }
+
+        if (sortHeader != null) {
+            for (TableColumn<MutableEntryRow, ?> c : table.getColumns()) {
+                if (sortHeader.equals(c.getText())) {
+                    c.setSortType(sortType);
+                    table.getSortOrder().clear();
+                    table.getSortOrder().add(c);
+                    break;
+                }
+            }
+        }
+    }
 
     private void rebuildColumns() {
         table.getColumns().clear();
@@ -595,6 +635,7 @@ public class MetadataBrowserWindow {
         tc.setSortable(true);
         tc.setEditable(true);
         tc.setUserData(Boolean.TRUE);
+        tc.getProperties().put(METADATA_KEY_PROP, metadataKey);
         tc.setOnEditCommit(ev -> {
             MutableEntryRow row = ev.getRowValue();
             if (row == null) return;
