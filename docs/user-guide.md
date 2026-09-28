@@ -111,9 +111,64 @@ the most common way to populate a new column.
 Only **user-metadata key columns** are editable inline in v1.1.
 Built-in columns (Name, ID, URI, Description, Tags) are sourced from
 image-entry properties via different QuPath setters and are read-only
-here. To rename an image, use QuPath's main project pane.
+here. To rename an image, use QuPath's main project pane. The tinted
+`[image]` columns are read-only too; see
+[Image metadata columns](#image-metadata-columns).
 
 </details>
+
+## Image metadata columns
+
+The Entries tab shows five columns about the image itself, next to the
+project metadata you edit. They are tagged `[image]` in the header and
+tinted, so they read as a different kind of column: you cannot type into
+them, and their values come from the image, not from a metadata key.
+
+| Column | Value | Source |
+|---|---|---|
+| Image type | `Brightfield (H&E)`, `Fluorescence`, `Not set`, ... | Each entry's data file (`data.qpdata`) |
+| Pixel size | `0.25 um`, `0.5 x 1 um` if anisotropic, or `uncalibrated` | Project file (cached server metadata) |
+| Size | `20000 x 15000`, with ` x 7 z` / ` x 12 t` appended for stacks | Project file |
+| Channels | Count; hover for the channel names | Project file |
+| Magnification | `20x`, or blank if the file does not record one | Project file |
+
+A blank cell in the last four columns means the project has no cached
+metadata for that entry yet -- typically an image that was added but
+never opened. Open it once and Refresh.
+
+**Sorting by modality.** Click the **Image type** header to group a mixed
+project into H&E, fluorescence and unset entries. The numeric columns
+sort by value, not text (`0.25 um` before `10 um`; `512 x 512` before
+`2048 x 2048`).
+
+**Show or hide.** The **Image metadata** checkbox in the toolbar shows or
+hides all five at once and is remembered across sessions. The Columns
+menu still lets you hide any one of them individually. Hidden columns are
+left out of Filter rows, Fit Columns and Export, like any other hidden
+column.
+
+**How image type is read.** QuPath stores the image type in each entry's
+data file, not the project file. The browser reads just that field from
+each file in the background -- it does not load the entry's objects -- so
+the column fills in a moment after the window opens, showing `...` until
+it does. `(unreadable)` means the data file exists but could not be
+parsed; opening the image in QuPath will say why.
+
+**Changing the image type.** Right-click one or more selected rows >
+**Set image type...**, pick a type, and confirm. This is different from
+every other edit in the browser:
+
+- it writes immediately, not on Save;
+- it is **not undoable** from the browser (Undo covers project metadata
+  only);
+- it loads and re-saves each entry's data file, so it is slow on images
+  with many detections;
+- if one of the selected images is open in QuPath, its type changes in
+  the viewer straight away.
+
+The confirmation dialog states all of this before anything is written.
+Failures (a missing image file, for instance) are listed at the end; the
+rest of the selection still goes through.
 
 ## Workflow 1: Templates and partner-supplied metadata
 

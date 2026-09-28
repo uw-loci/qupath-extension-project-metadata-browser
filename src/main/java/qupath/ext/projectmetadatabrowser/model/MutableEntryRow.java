@@ -12,6 +12,7 @@ import java.util.Objects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import qupath.lib.images.ImageData.ImageType;
 import qupath.lib.projects.ProjectImageEntry;
 
 /**
@@ -40,9 +41,26 @@ public final class MutableEntryRow {
     public static final String COL_DESCRIPTION = "Description";
     public static final String COL_TAGS = "Tags";
 
+    /** Header suffix marking the read-only image-metadata columns. */
+    public static final String IMAGE_COL_TAG = " [image]";
+    public static final String COL_IMAGE_TYPE = "Image type" + IMAGE_COL_TAG;
+    public static final String COL_PIXEL_SIZE = "Pixel size" + IMAGE_COL_TAG;
+    public static final String COL_IMAGE_SIZE = "Size" + IMAGE_COL_TAG;
+    public static final String COL_CHANNELS = "Channels" + IMAGE_COL_TAG;
+    public static final String COL_MAGNIFICATION = "Magnification" + IMAGE_COL_TAG;
+
+    /** Placeholder shown in the Image type column until the background read lands. */
+    public static final String IMAGE_TYPE_PENDING = "...";
+    /** Shown when the entry's data file exists but could not be read. */
+    public static final String IMAGE_TYPE_UNREADABLE = "(unreadable)";
+
     private final ProjectImageEntry<BufferedImage> entry;
     private final Map<String, String> metadata;
     private final Map<String, String> originalMetadata;
+    private final ImageInfo imageInfo;
+    // null = not read yet; set from a background thread, read on the FX thread.
+    private volatile ImageType imageType;
+    private volatile boolean imageTypeUnreadable;
 
     /**
      * Snapshot the entry's user metadata into the working copy. The snapshot
@@ -62,11 +80,60 @@ public final class MutableEntryRow {
         }
         this.metadata = copy;
         this.originalMetadata = orig;
+        this.imageInfo = ImageInfo.from(entry);
     }
 
     /** The wrapped project image entry. Never null. */
     public ProjectImageEntry<BufferedImage> getEntry() {
         return entry;
+    }
+
+    /** Cached server metadata for the entry; {@link ImageInfo#EMPTY} if none. */
+    public ImageInfo getImageInfo() {
+        return imageInfo;
+    }
+
+    /** Image type read from the entry's data file, or null if not read yet. */
+    public ImageType getImageType() {
+        return imageType;
+    }
+
+    /**
+     * Records the image type for display.
+     *
+     * @param type the type; null marks the data file as unreadable.
+     */
+    public void setImageType(ImageType type) {
+        this.imageType = type;
+        this.imageTypeUnreadable = type == null;
+    }
+
+    public boolean isImageTypeLoaded() {
+        return imageType != null || imageTypeUnreadable;
+    }
+
+    /** Display text for the Image type column. */
+    public String getImageTypeText() {
+        ImageType t = imageType;
+        if (t != null)
+            return t.toString();
+        return imageTypeUnreadable ? IMAGE_TYPE_UNREADABLE : IMAGE_TYPE_PENDING;
+    }
+
+    public String getPixelSizeText() {
+        return imageInfo.getPixelSizeText();
+    }
+
+    public String getImageSizeText() {
+        return imageInfo.getSizeText();
+    }
+
+    public String getChannelCountText() {
+        return imageInfo.getChannelCountText();
+    }
+
+    public String getMagnificationText() {
+        return imageInfo.getMagnificationText();
     }
 
     /** Stable per-session identifier for this entry. */

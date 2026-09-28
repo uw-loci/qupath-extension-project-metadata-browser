@@ -69,6 +69,19 @@ until Save.
   reuse the v0.2.0 rename's Overwrite / Skip / Cancel policy.
 - Refresh (F5) picks up metadata added by scripts or acquisitions while
   the browser is open. Disabled while there are unsaved edits.
+- **Image metadata columns (new in v1.1.0).** Five read-only columns
+  tagged `[image]` and tinted so they read as a different kind of column
+  from the editable keys: **Image type** (H&E, fluorescence, ...),
+  **Pixel size**, **Size** (W x H, plus z / t depth), **Channels** (count;
+  names in the tooltip) and **Magnification**. Sort on Image type to
+  group a mixed project by modality. The **Image metadata** checkbox in
+  the toolbar shows or hides all five at once (saved across sessions).
+  Pixel size, size, channels and magnification come from the project
+  file; image type is read from each entry's data file in the background
+  without loading its objects. Right-click > **Set image type...** changes
+  the type on the selected entries -- this rewrites their data files and
+  is not undoable from the browser, so it asks first. See the
+  [user guide](docs/user-guide.md#image-metadata-columns).
 
 ## Install
 

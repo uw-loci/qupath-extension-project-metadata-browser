@@ -14,6 +14,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
 import java.util.function.Predicate;
 
 import javafx.application.Platform;
@@ -28,7 +32,9 @@ import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.ButtonBar;
 import javafx.scene.control.ButtonType;
+import javafx.scene.control.CheckBox;
 import javafx.scene.control.CheckMenuItem;
+import javafx.scene.control.ChoiceDialog;
 import javafx.scene.control.ContextMenu;
 import javafx.scene.control.Label;
 import javafx.scene.control.Menu;
@@ -72,18 +78,23 @@ import org.slf4j.LoggerFactory;
 import qupath.ext.projectmetadatabrowser.Preferences;
 import qupath.ext.projectmetadatabrowser.core.AddColumnCommand;
 import qupath.ext.projectmetadatabrowser.core.BulkSetCellsCommand;
+import qupath.ext.projectmetadatabrowser.core.ImageTypeReader;
 import qupath.ext.projectmetadatabrowser.core.ImportCommand;
 import qupath.ext.projectmetadatabrowser.core.MetadataCommand;
 import qupath.ext.projectmetadatabrowser.core.MetadataKeyOperations;
 import qupath.ext.projectmetadatabrowser.core.RegexExtractCommand;
 import qupath.ext.projectmetadatabrowser.core.SetCellCommand;
 import qupath.ext.projectmetadatabrowser.core.UndoStack;
+import qupath.ext.projectmetadatabrowser.model.ImageInfo;
 import qupath.ext.projectmetadatabrowser.model.MetadataModel;
 import qupath.ext.projectmetadatabrowser.model.MutableEntryRow;
 import qupath.ext.projectmetadatabrowser.model.WorkingCopy;
 import qupath.fx.dialogs.Dialogs;
 import qupath.lib.gui.QuPathGUI;
+import qupath.lib.images.ImageData;
+import qupath.lib.images.ImageData.ImageType;
 import qupath.lib.projects.Project;
+import qupath.lib.projects.ProjectImageEntry;
 
 /**
  * Non-modal browser window. Single instance per QuPath session; reused when
@@ -131,6 +142,20 @@ public class MetadataBrowserWindow {
     private final Set<String> builtInColumnHeaders = Set.of(
             MutableEntryRow.COL_NAME, MutableEntryRow.COL_ID, MutableEntryRow.COL_URI,
             MutableEntryRow.COL_DESCRIPTION, MutableEntryRow.COL_TAGS);
+
+    /** Column property marking the read-only image-metadata columns. */
+    private static final String IMAGE_COL_PROP = "projectMetadataBrowser.imageColumn";
+
+    private final CheckBox imageMetaCheck = new CheckBox("Image metadata");
+
+    // Image types are read from each entry's data file off the FX thread; the
+    // generation counter lets a reload or project switch discard a stale pass.
+    private final ExecutorService imageTypeExecutor = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "metadata-browser-image-types");
+        t.setDaemon(true);
+        return t;
+    });
+    private final AtomicInteger imageTypeGeneration = new AtomicInteger();
 
     private final ChangeListener<Project<BufferedImage>> projectListener;
 
@@ -184,7 +209,22 @@ public class MetadataBrowserWindow {
         Button closeBtn = new Button("Close");
         closeBtn.setOnAction(e -> requestCloseWindow());
 
-        HBox topBar = new HBox(8, new Label("Filter rows:"), searchField, refreshBtn, fitBtn);
+        imageMetaCheck.setTooltip(new Tooltip(
+                "Show the read-only image columns (Image type, Pixel size, Size,\n"
+                        + "Channels, Magnification), tinted and tagged [image].\n"
+                        + "Pixel size, size, channels and magnification come from the\n"
+                        + "project file; image type is read from each entry's data file\n"
+                        + "in the background. Saved across sessions."));
+        imageMetaCheck.selectedProperty().bindBidirectional(Preferences.SHOW_IMAGE_METADATA);
+        imageMetaCheck.selectedProperty().addListener((obs, o, n) -> {
+            setImageColumnsVisible(Boolean.TRUE.equals(n));
+            if (Boolean.TRUE.equals(n))
+                ensureImageTypesLoaded();
+        });
+
+        HBox topBar = new HBox(8, new Label("Filter rows:"), searchField, refreshBtn, fitBtn,
+                imageMetaCheck);
+        topBar.setAlignment(javafx.geometry.Pos.CENTER_LEFT);
         HBox.setHgrow(searchField, Priority.ALWAYS);
         topBar.setStyle("-fx-padding: 8;");
 
@@ -283,6 +323,7 @@ public class MetadataBrowserWindow {
             boolean keysActive = newTab == keysTab;
             searchField.setDisable(keysActive);
             fitBtn.setDisable(keysActive);
+            imageMetaCheck.setDisable(keysActive);
             columnsMenu.setDisable(keysActive);
             updateStatusLabel();
         });
@@ -459,6 +500,9 @@ public class MetadataBrowserWindow {
         model.loadFrom(project);
         rebuildColumnsPreservingState();
         undoStack.clear();
+        imageTypeGeneration.incrementAndGet();
+        if (Preferences.SHOW_IMAGE_METADATA.get())
+            ensureImageTypesLoaded();
 
         table.setPlaceholder(new Label(project == null
                 ? "No project open."
@@ -560,6 +604,20 @@ public class MetadataBrowserWindow {
         addBuiltInColumn(MutableEntryRow.COL_DESCRIPTION, MutableEntryRow::getDescription);
         addBuiltInColumn(MutableEntryRow.COL_TAGS, MutableEntryRow::getTags);
 
+        columnsMenu.getItems().add(new SeparatorMenuItem());
+        addImageColumn(MutableEntryRow.COL_IMAGE_TYPE, MutableEntryRow::getImageTypeText,
+                null, null);
+        addImageColumn(MutableEntryRow.COL_PIXEL_SIZE, MutableEntryRow::getPixelSizeText,
+                ImageInfo.leadingNumberComparator(), null);
+        addImageColumn(MutableEntryRow.COL_IMAGE_SIZE, MutableEntryRow::getImageSizeText,
+                ImageInfo.leadingNumberComparator(), null);
+        addImageColumn(MutableEntryRow.COL_CHANNELS, MutableEntryRow::getChannelCountText,
+                ImageInfo.leadingNumberComparator(),
+                r -> r.getImageInfo().getChannelNamesText());
+        addImageColumn(MutableEntryRow.COL_MAGNIFICATION, MutableEntryRow::getMagnificationText,
+                ImageInfo.leadingNumberComparator(), null);
+        columnsMenu.getItems().add(new SeparatorMenuItem());
+
         for (String key : workingCopy.getColumnKeys()) {
             String header = builtInColumnHeaders.contains(key) ? key + " (metadata)" : key;
             addUserKeyColumn(header, key);
@@ -653,6 +711,233 @@ public class MetadataBrowserWindow {
         item.setSelected(true);
         item.selectedProperty().bindBidirectional(tc.visibleProperty());
         columnsMenu.getItems().add(item);
+    }
+
+    /**
+     * Adds one read-only image-metadata column: tinted cells, header tagged
+     * {@link MutableEntryRow#IMAGE_COL_TAG}, hidden when the Image metadata
+     * checkbox is off.
+     *
+     * @param comparator numeric-aware sort, or null for plain text order.
+     * @param tooltipResolver tooltip text per row, or null to tooltip the value.
+     */
+    private void addImageColumn(String header,
+                                Function<MutableEntryRow, String> resolver,
+                                java.util.Comparator<String> comparator,
+                                Function<MutableEntryRow, String> tooltipResolver) {
+        columnResolvers.put(header, resolver);
+        TableColumn<MutableEntryRow, String> tc = new TableColumn<>(header);
+        tc.setCellValueFactory(cdf -> new ReadOnlyStringWrapper(resolver.apply(cdf.getValue())));
+        tc.setCellFactory(col -> new ImageInfoCell(tooltipResolver));
+        tc.setPrefWidth(preferredWidthFor(header));
+        tc.setMinWidth(60);
+        tc.setSortable(true);
+        if (comparator != null)
+            tc.setComparator(comparator);
+        tc.setEditable(false);
+        tc.setUserData(Boolean.FALSE);
+        tc.getProperties().put(IMAGE_COL_PROP, Boolean.TRUE);
+        tc.setVisible(Preferences.SHOW_IMAGE_METADATA.get());
+        table.getColumns().add(tc);
+
+        CheckMenuItem item = new CheckMenuItem(header);
+        item.setSelected(tc.isVisible());
+        item.selectedProperty().bindBidirectional(tc.visibleProperty());
+        columnsMenu.getItems().add(item);
+    }
+
+    private boolean isImageColumn(TableColumn<MutableEntryRow, ?> c) {
+        return Boolean.TRUE.equals(c.getProperties().get(IMAGE_COL_PROP));
+    }
+
+    private void setImageColumnsVisible(boolean visible) {
+        for (TableColumn<MutableEntryRow, ?> c : table.getColumns()) {
+            if (isImageColumn(c))
+                c.setVisible(visible);
+        }
+    }
+
+    /**
+     * Reads the image type of every row that does not have one yet, on the
+     * background executor, refreshing the table every few dozen rows. A
+     * reload bumps the generation so a pass over the previous project's rows
+     * discards its results.
+     */
+    private void ensureImageTypesLoaded() {
+        List<MutableEntryRow> pending = new ArrayList<>();
+        for (MutableEntryRow r : workingCopy.getRows()) {
+            if (!r.isImageTypeLoaded())
+                pending.add(r);
+        }
+        if (pending.isEmpty())
+            return;
+        final int generation = imageTypeGeneration.get();
+        imageTypeExecutor.submit(() -> {
+            int done = 0;
+            for (MutableEntryRow r : pending) {
+                if (generation != imageTypeGeneration.get())
+                    return;
+                r.setImageType(ImageTypeReader.readForEntry(r.getEntry()));
+                done++;
+                if (done % 50 == 0)
+                    Platform.runLater(table::refresh);
+            }
+            Platform.runLater(() -> {
+                if (generation != imageTypeGeneration.get())
+                    return;
+                table.refresh();
+                // Re-sort if the user already sorted on the type column.
+                if (!table.getSortOrder().isEmpty())
+                    table.sort();
+            });
+        });
+    }
+
+    /**
+     * Sets the image type on every selected entry. This is a direct write to
+     * each entry's data file (load the objects, set the type, save), so it is
+     * outside the working copy and its undo stack; the user confirms first.
+     */
+    private void setImageTypeForSelection() {
+        List<MutableEntryRow> rows = new ArrayList<>(table.getSelectionModel().getSelectedItems());
+        rows.removeIf(java.util.Objects::isNull);
+        if (rows.isEmpty())
+            return;
+
+        ChoiceDialog<ImageType> choice = new ChoiceDialog<>(ImageType.BRIGHTFIELD_H_E,
+                ImageType.values());
+        choice.initOwner(stage);
+        choice.setTitle("Set image type");
+        choice.setHeaderText(rows.size() == 1
+                ? "Set the image type of " + rows.get(0).getName()
+                : "Set the image type of " + rows.size() + " selected entries");
+        choice.setContentText("Image type:");
+        Optional<ImageType> picked = choice.showAndWait();
+        if (picked.isEmpty())
+            return;
+        ImageType type = picked.get();
+
+        Alert confirm = new Alert(Alert.AlertType.CONFIRMATION);
+        confirm.initOwner(stage);
+        confirm.setTitle("Set image type - confirm");
+        confirm.setHeaderText("Rewrite " + rows.size() + " data file"
+                + (rows.size() == 1 ? "" : "s") + "?");
+        confirm.setContentText("Image type is stored in each entry's data file alongside its "
+                + "objects, so this loads and re-saves every selected entry (slow for images "
+                + "with many objects). It takes effect immediately and cannot be undone from "
+                + "this window.\n\nNew type: " + type);
+        confirm.getButtonTypes().setAll(ButtonType.OK, ButtonType.CANCEL);
+        if (confirm.showAndWait().orElse(ButtonType.CANCEL) != ButtonType.OK)
+            return;
+
+        final ImageData<BufferedImage> openData = qupath.getImageData();
+        final Project<BufferedImage> project = qupath.getProject();
+        final ProjectImageEntry<BufferedImage> openEntry =
+                (project == null || openData == null) ? null : project.getEntry(openData);
+
+        showTransientStatusMessage("Setting image type on " + rows.size() + " entr"
+                + (rows.size() == 1 ? "y" : "ies") + "...");
+        Thread worker = new Thread(() -> {
+            List<String> failures = new ArrayList<>();
+            int done = 0;
+            for (MutableEntryRow row : rows) {
+                ProjectImageEntry<BufferedImage> entry = row.getEntry();
+                try {
+                    if (openEntry != null && openEntry.equals(entry)) {
+                        // The open image: change the live ImageData so the
+                        // viewer agrees, then persist it.
+                        openData.setImageType(type);
+                        entry.saveImageData(openData);
+                    } else {
+                        ImageData<BufferedImage> data = entry.readImageData();
+                        data.setImageType(type);
+                        entry.saveImageData(data);
+                    }
+                    row.setImageType(type);
+                } catch (Exception e) {
+                    logger.warn("Could not set image type on {}: {}", row.getName(), e.toString());
+                    failures.add(row.getName() + ": " + e.getMessage());
+                }
+                done++;
+                final int n = done;
+                Platform.runLater(() -> {
+                    showTransientStatusMessage("Setting image type: " + n + " / " + rows.size());
+                    table.refresh();
+                });
+            }
+            Platform.runLater(() -> {
+                table.refresh();
+                int ok = rows.size() - failures.size();
+                showTransientStatusMessage("Image type set to " + type + " on " + ok
+                        + " entr" + (ok == 1 ? "y" : "ies")
+                        + (failures.isEmpty() ? "." : "; " + failures.size() + " failed."));
+                if (!failures.isEmpty()) {
+                    Alert err = new Alert(Alert.AlertType.WARNING);
+                    err.initOwner(stage);
+                    err.setTitle("Set image type - failures");
+                    err.setHeaderText(failures.size() + " entr"
+                            + (failures.size() == 1 ? "y" : "ies") + " could not be updated");
+                    err.setContentText(String.join("\n", failures));
+                    err.show();
+                }
+            });
+        }, "metadata-browser-set-image-type");
+        worker.setDaemon(true);
+        worker.start();
+    }
+
+    /**
+     * Read-only cell for the image-metadata columns: tinted so they read as a
+     * different kind of column from the editable user keys, in both themes.
+     * The tint is dropped while the cell is selected so the selection
+     * highlight stays visible.
+     */
+    private static final class ImageInfoCell extends TableCell<MutableEntryRow, String> {
+        private static final String TINT =
+                "-fx-background-color: ladder(-fx-background, "
+                        + "rgba(130,170,235,0.20) 49%, rgba(40,90,170,0.10) 50%);";
+        private final Function<MutableEntryRow, String> tooltipResolver;
+
+        ImageInfoCell(Function<MutableEntryRow, String> tooltipResolver) {
+            this.tooltipResolver = tooltipResolver;
+            setWrapText(true);
+            selectedProperty().addListener((obs, o, n) -> applyTint());
+        }
+
+        private void applyTint() {
+            setStyle(isEmpty() || isSelected() ? "" : TINT);
+        }
+
+        @Override
+        protected void updateItem(String item, boolean empty) {
+            super.updateItem(item, empty);
+            if (empty || item == null) {
+                setText(null);
+                setTooltip(null);
+                setStyle("");
+                return;
+            }
+            setText(item);
+            String tip = item;
+            if (tooltipResolver != null && getTableRow() != null && getTableRow().getItem() != null) {
+                String t = tooltipResolver.apply(getTableRow().getItem());
+                if (t != null && !t.isEmpty())
+                    tip = t;
+            }
+            if (tip.isEmpty()) {
+                setTooltip(null);
+            } else {
+                Tooltip tt = getTooltip();
+                if (tt == null) {
+                    tt = new Tooltip();
+                    tt.setWrapText(true);
+                    tt.setMaxWidth(600);
+                    setTooltip(tt);
+                }
+                tt.setText(tip);
+            }
+            applyTint();
+        }
     }
 
     /**
@@ -882,12 +1167,18 @@ public class MetadataBrowserWindow {
             if (row != null)
                 editMetadata(row);
         });
+        MenuItem imageTypeItem = new MenuItem("Set image type...");
+        imageTypeItem.setOnAction(e -> setImageTypeForSelection());
         ContextMenu menu = new ContextMenu(openItem, copyItem, pasteItem,
-                new SeparatorMenuItem(), editItem);
+                new SeparatorMenuItem(), editItem, imageTypeItem);
         menu.setOnShowing(e -> {
             int n = table.getSelectionModel().getSelectedItems().size();
             copyItem.setDisable(n == 0);
             openItem.setDisable(n == 0);
+            imageTypeItem.setDisable(n == 0);
+            imageTypeItem.setText(n > 1
+                    ? "Set image type... (" + n + " selected)"
+                    : "Set image type...");
             if (n > 1) {
                 editItem.setText("Edit metadata... (only first of " + n + " selected)");
                 editItem.setDisable(true);
