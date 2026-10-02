@@ -21,7 +21,12 @@ you do is undoable with Ctrl+Z before you save, and the close prompt
 asks before discarding unsaved work. The on-disk project is untouched
 until Save.
 
-![Project Metadata Browser window showing the Filter rows box, sortable Name/ID/URI/Description/Tags columns alongside OCR_* metadata columns, an entry count of 467 shown / 467 total, and the Refresh, Fit Columns, Max column width, Export, and Close controls.](images/metadata-browser-window.png)
+![Project Metadata Browser window on a 467-image project of polarized-light acquisitions, sorted by Name. A Name column is followed by five tinted read-only columns tagged [image] (Image type, Pixel size, Size, Channels, Magnification) and then the editable project keys angle, modality and objective. Each acquisition has four angle images; the single-channel birefringence image is typed Other while its three-channel siblings are Brightfield (H&E). The toolbar holds the Filter rows box, Refresh, Fit Columns and the Image metadata checkbox; the footer shows 467 shown / 467 total, Max column width, Export and Close.](images/metadata-browser-window.png)
+
+*A real 467-image project. The tinted `[image]` columns are read from the
+images; `angle`, `modality` and `objective` are project metadata keys.
+Magnification is blank because these OME-TIFFs do not record one. Other
+columns are hidden via the Columns menu.*
 
 ## Features
 

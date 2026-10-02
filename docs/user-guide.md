@@ -124,6 +124,17 @@ project metadata you edit. They are tagged `[image]` in the header and
 tinted, so they read as a different kind of column: you cannot type into
 them, and their values come from the image, not from a metadata key.
 
+![Entries tab sorted by Image type: brightfield H&E images grouped above fluorescence images, with the five tinted [image] columns between Name and the editable Set, Source and Stain keys.](../images/image-metadata-columns.png)
+
+*A ten-image example project of public sample images (CMU-1.svs, the
+LuCa-7color Bio-Formats sample, demo tiles and synthetic phantoms),
+sorted by Image type. The `[image]` values come from the files; the Set /
+Source / Stain keys were added for illustration.*
+
+The tint follows QuPath's theme:
+
+![The same window in QuPath's dark theme; the [image] columns carry a blue-grey tint against the dark table.](../images/image-metadata-columns-dark.png)
+
 | Column | Value | Source |
 |---|---|---|
 | Image type | `Brightfield (H&E)`, `Fluorescence`, `Not set`, ... | Each entry's data file (`data.qpdata`) |
