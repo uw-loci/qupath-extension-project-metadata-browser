@@ -2,6 +2,7 @@ package qupath.ext.projectmetadatabrowser.ui;
 
 import java.awt.image.BufferedImage;
 import java.util.Comparator;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
@@ -232,8 +233,8 @@ public final class MetadataKeysTab {
             filtered.setPredicate(r -> true);
             return;
         }
-        String needle = raw.toLowerCase();
-        Predicate<MetadataKeyRow> p = row -> row.getKey().toLowerCase().contains(needle);
+        String needle = raw.toLowerCase(Locale.ROOT);
+        Predicate<MetadataKeyRow> p = row -> row.getKey().toLowerCase(Locale.ROOT).contains(needle);
         filtered.setPredicate(p);
     }
 

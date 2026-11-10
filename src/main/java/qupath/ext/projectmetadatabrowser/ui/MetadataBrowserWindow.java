@@ -11,6 +11,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -1101,14 +1102,14 @@ public class MetadataBrowserWindow {
             filtered.setPredicate(r -> true);
             return;
         }
-        String needle = raw.toLowerCase();
+        String needle = raw.toLowerCase(Locale.ROOT);
         Predicate<MutableEntryRow> p = row -> {
             for (TableColumn<MutableEntryRow, ?> c : table.getColumns()) {
                 if (!c.isVisible())
                     continue;
                 var resolver = columnResolvers.get(c.getText());
                 String v = resolver == null ? "" : resolver.apply(row);
-                if (v != null && v.toLowerCase().contains(needle))
+                if (v != null && v.toLowerCase(Locale.ROOT).contains(needle))
                     return true;
             }
             return false;
@@ -1385,7 +1386,7 @@ public class MetadataBrowserWindow {
         if (file == null)
             return;
 
-        boolean tsv = file.getName().toLowerCase().endsWith(".tsv");
+        boolean tsv = file.getName().toLowerCase(Locale.ROOT).endsWith(".tsv");
         char sep = tsv ? '\t' : ',';
 
         try (BufferedWriter w = Files.newBufferedWriter(Path.of(file.toURI()), StandardCharsets.UTF_8)) {
